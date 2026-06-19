@@ -1,912 +1,922 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Retro Pong</title>
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-  <style>
-    /* CSS reset to ensure zero bloat and absolute black background */
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      user-select: none;
-      -webkit-user-select: none;
-      touch-action: none; /* Prevent browser gestures */
-    }
-    body, html {
-      width: 100%;
-      height: 100%;
-      background-color: #000000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      overflow: hidden;
-      font-family: 'Press Start 2P', monospace;
-    }
-    /* Center the canvas and keep its retro aspect ratio crisp */
-    canvas {
-      background-color: #000000;
-      display: block;
-      max-width: 100%;
-      max-height: 100vh;
-      border: 2px solid #222222;
-      box-shadow: 0 0 30px rgba(57, 255, 20, 0.1);
-
-      /* Crucial CSS properties to disable browser-side interpolation/smoothing */
-      image-rendering: -moz-crisp-edges;
-      image-rendering: -webkit-crisp-edges;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Retro Pong</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        /* CSS reset to ensure zero bloat and absolute black background */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none; /* Prevent browser gestures */
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            background-color: #000000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            font-family: 'Press Start 2P', monospace;
+        }
+        /* Center the canvas and keep its retro aspect ratio crisp */
+        canvas {
+            background-color: #000000;
+            display: block;
+            border: 2px solid #222222;
+            box-shadow: 0 0 30px rgba(57, 255, 20, 0.1);
+            
+            /* Crucial CSS properties to disable browser-side interpolation/smoothing */
+            image-rendering: -moz-crisp-edges;
+            image-rendering: -webkit-crisp-edges;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+    </style>
 </head>
 <body>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
-  const canvas = document.getElementById('gameCanvas');
-  const ctx = canvas.getContext('2d');
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
 
-  // Logical coordinates (Virtual canvas size for consistent game loop & coordinate mapping)
-  const logicalWidth = 600;
-  const logicalHeight = 800;
+    // Logical coordinates (Virtual canvas size for consistent game loop & coordinate mapping)
+    const logicalWidth = 600;
+    const logicalHeight = 800;
 
-  // Game States: 'START', 'PLAYING', 'GAMEOVER', 'SETTINGS'
-  let gameState = 'START';
-  let gameMode = null; // 1: Wall, 2: AI, 3: Spectate, 4: Local PvP
-  let score = 0;
+    // Game States: 'START', 'PLAYING', 'GAMEOVER', 'SETTINGS'
+    let gameState = 'START';
+    let gameMode = null; // 1: Wall, 2: AI, 3: Spectate, 4: Local PvP
+    let score = 0;
 
-  // Mode 4 PvP Variables
-  let scoreP1 = 0;
-  let scoreP2 = 0;
-  const MAX_SCORE = 11;
-  let winnerMode4 = 0;
+    // Mode 4 PvP Variables
+    let scoreP1 = 0;
+    let scoreP2 = 0;
+    const MAX_SCORE = 11;
+    let winnerMode4 = 0;
 
-  // Load High Scores from Local Storage
-  let highScoreMode1 = parseInt(localStorage.getItem('retroPongHighScore1')) || 0;
-  let highScoreMode2 = parseInt(localStorage.getItem('retroPongHighScore2')) || 0;
+    // Load High Scores from Local Storage
+    let highScoreMode1 = parseInt(localStorage.getItem('retroPongHighScore1')) || 0;
+    let highScoreMode2 = parseInt(localStorage.getItem('retroPongHighScore2')) || 0;
 
-  function updateHighScore(mode, scoreToSave) {
-    localStorage.setItem(`retroPongHighScore${mode}`, scoreToSave);
-  }
-
-  // Colors
-  const COLOR_BG = '#000000';
-  const COLOR_PADDLE = '#ffffff';
-  const COLOR_BALL = '#39ff14'; // Retro Phosphor Green
-  const COLOR_TEXT = '#ffffff';
-  const COLOR_MUTED = '#888888';
-
-  // Font Config
-  const FONT_FAMILY = "'Press Start 2P', monospace";
-
-  // Dynamic High-DPI Backing Store Scaling Setup
-  function resize() {
-    const dpr = window.devicePixelRatio || 1;
-
-    // Update canvas backing buffer to physical screen pixels
-    canvas.width = logicalWidth * dpr;
-    canvas.height = logicalHeight * dpr;
-
-    // Keep presentation size locked to logical pixels so CSS fits responsive containers beautifully
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvas.style.maxWidth = `${logicalWidth}px`;
-    canvas.style.maxHeight = '100vh';
-
-    // Scale context drawing once so all coordinates can map to 600x800 logical grid
-    ctx.scale(dpr, dpr);
-
-    // Disable anti-aliasing for raw pixel perfect edges
-    ctx.imageSmoothingEnabled = false;
-    ctx.mozImageSmoothingEnabled = false;
-    ctx.webkitImageSmoothingEnabled = false;
-    ctx.msImageSmoothingEnabled = false;
-  }
-
-  // Call resize on initial frame & whenever browser screen environment changes
-  window.addEventListener('resize', resize);
-  resize();
-
-  // Visual Polish Systems
-  let crtEnabled = true;
-  let shakeTime = 0;
-  let shakeIntensity = 0;
-  const particles = [];
-  const ballTrail = [];
-  const MAX_TRAIL_LENGTH = 7;
-
-  function triggerShake(intensity, duration) {
-    shakeIntensity = intensity;
-    shakeTime = duration;
-  }
-
-  function createSparks(x, y, color) {
-    for (let i = 0; i < 15; i++) {
-      particles.push({
-        x: x,
-        y: y,
-        vx: (Math.random() - 0.5) * 6,
-        vy: (Math.random() - 0.5) * 6,
-        radius: Math.random() * 2.5 + 1.2,
-        alpha: 1.0,
-        decay: Math.random() * 0.03 + 0.015,
-        color: color
-      });
-    }
-  }
-
-  function updateVisualEffects() {
-    // Update particles
-    for (let i = particles.length - 1; i >= 0; i--) {
-      const p = particles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-      if (p.alpha <= 0) {
-        particles.splice(i, 1);
-      }
+    function updateHighScore(mode, scoreToSave) {
+        localStorage.setItem(`retroPongHighScore${mode}`, scoreToSave);
     }
 
-    // Update trail
-    if (gameState === 'PLAYING') {
-      ballTrail.push({ x: ball.x, y: ball.y });
-      if (ballTrail.length > MAX_TRAIL_LENGTH) {
-        ballTrail.shift();
-      }
-    } else {
-      ballTrail.length = 0;
+    // Colors
+    const COLOR_BG = '#000000';
+    const COLOR_PADDLE = '#ffffff';
+    const COLOR_BALL = '#39ff14'; // Retro Phosphor Green
+    const COLOR_TEXT = '#ffffff';
+    const COLOR_MUTED = '#888888';
+
+    // Font Config
+    const FONT_FAMILY = "'Press Start 2P', monospace";
+
+    // Dynamic High-DPI Backing Store Scaling Setup with Fixed Aspect Ratio fitting
+    function resize() {
+        const dpr = window.devicePixelRatio || 1;
+        
+        // Calculate maximum available space with an elegant margin for outer borders
+        const margin = 16;
+        const maxW = window.innerWidth - margin;
+        const maxH = window.innerHeight - margin;
+        
+        let targetWidth = maxW;
+        let targetHeight = maxW * (logicalHeight / logicalWidth);
+        
+        // If the calculated height is too tall for the screen, scale by height instead
+        if (targetHeight > maxH) {
+            targetHeight = maxH;
+            targetWidth = maxH * (logicalWidth / logicalHeight);
+        }
+        
+        // Set exact style sizing matching the strict aspect ratio to prevent stretching
+        canvas.style.width = `${targetWidth}px`;
+        canvas.style.height = `${targetHeight}px`;
+
+        // Update canvas backing buffer to physical screen high-res pixels
+        canvas.width = logicalWidth * dpr;
+        canvas.height = logicalHeight * dpr;
+
+        // Scale context drawing once so all coordinates map perfectly to 600x800 grid
+        ctx.scale(dpr, dpr);
+
+        // Disable anti-aliasing for raw pixel perfect edges
+        ctx.imageSmoothingEnabled = false;
+        ctx.mozImageSmoothingEnabled = false;
+        ctx.webkitImageSmoothingEnabled = false;
+        ctx.msImageSmoothingEnabled = false;
     }
-  }
 
-  function drawVisualEffects() {
-    // Draw Ball Trail
-    for (let i = 0; i < ballTrail.length; i++) {
-      const pt = ballTrail[i];
-      const alpha = (i + 1) / (ballTrail.length + 1) * 0.35;
-      ctx.fillStyle = COLOR_BALL;
-      ctx.globalAlpha = alpha;
-      ctx.fillRect(pt.x - ball.radius, pt.y - ball.radius, ball.radius * 2, ball.radius * 2);
-    }
-    ctx.globalAlpha = 1.0; // Reset alpha
+    // Call resize on initial frame & whenever browser screen environment changes
+    window.addEventListener('resize', resize);
+    resize();
 
-    // Draw Particles
-    for (let p of particles) {
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = p.alpha;
-      ctx.fillRect(p.x - p.radius, p.y - p.radius, p.radius * 2, p.radius * 2);
-    }
-    ctx.globalAlpha = 1.0; // Reset alpha
-  }
+    // Visual Polish Systems
+    let crtEnabled = true;
+    let shakeTime = 0;
+    let shakeIntensity = 0;
+    const particles = [];
+    const ballTrail = [];
+    const MAX_TRAIL_LENGTH = 7;
 
-  function drawCRTOverlay() {
-    if (!crtEnabled) return;
-    ctx.save();
-
-    // Scanline lines
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
-    for (let y = 0; y < logicalHeight; y += 4) {
-      ctx.fillRect(0, y, logicalWidth, 1.5);
+    function triggerShake(intensity, duration) {
+        shakeIntensity = intensity;
+        shakeTime = duration;
     }
 
-    // Retro Vignette
-    const vignette = ctx.createRadialGradient(
+    function createSparks(x, y, color) {
+        for (let i = 0; i < 15; i++) {
+            particles.push({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * 6,
+                vy: (Math.random() - 0.5) * 6,
+                radius: Math.random() * 2.5 + 1.2,
+                alpha: 1.0,
+                decay: Math.random() * 0.03 + 0.015,
+                color: color
+            });
+        }
+    }
+
+    function updateVisualEffects() {
+        // Update particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.alpha -= p.decay;
+            if (p.alpha <= 0) {
+                particles.splice(i, 1);
+            }
+        }
+
+        // Update trail
+        if (gameState === 'PLAYING') {
+            ballTrail.push({ x: ball.x, y: ball.y });
+            if (ballTrail.length > MAX_TRAIL_LENGTH) {
+                ballTrail.shift();
+            }
+        } else {
+            ballTrail.length = 0;
+        }
+    }
+
+    function drawVisualEffects() {
+        // Draw Ball Trail
+        for (let i = 0; i < ballTrail.length; i++) {
+            const pt = ballTrail[i];
+            const alpha = (i + 1) / (ballTrail.length + 1) * 0.35;
+            ctx.fillStyle = COLOR_BALL;
+            ctx.globalAlpha = alpha;
+            ctx.fillRect(pt.x - ball.radius, pt.y - ball.radius, ball.radius * 2, ball.radius * 2);
+        }
+        ctx.globalAlpha = 1.0; // Reset alpha
+
+        // Draw Particles
+        for (let p of particles) {
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = p.alpha;
+            ctx.fillRect(p.x - p.radius, p.y - p.radius, p.radius * 2, p.radius * 2);
+        }
+        ctx.globalAlpha = 1.0; // Reset alpha
+    }
+
+    function drawCRTOverlay() {
+        if (!crtEnabled) return;
+        ctx.save();
+        
+        // Scanline lines
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+        for (let y = 0; y < logicalHeight; y += 4) {
+            ctx.fillRect(0, y, logicalWidth, 1.5);
+        }
+
+        // Retro Vignette
+        const vignette = ctx.createRadialGradient(
             logicalWidth / 2, logicalHeight / 2, logicalHeight / 3,
             logicalWidth / 2, logicalHeight / 2, logicalHeight * 0.75
-    );
-    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
-    ctx.fillStyle = vignette;
-    ctx.fillRect(0, 0, logicalWidth, logicalHeight);
-    ctx.restore();
-  }
-
-  // Web Audio API Synthesizer
-  let audioCtx = null;
-  let soundEnabled = true;
-
-  function initAudio() {
-    if (!audioCtx) {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        );
+        vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        vignette.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+        ctx.restore();
     }
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-  }
 
-  function playTone(freq, type, duration) {
-    if (!soundEnabled || !audioCtx) return;
-    const osc = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
+    // Web Audio API Synthesizer
+    let audioCtx = null;
+    let soundEnabled = true;
 
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-
-    gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-
-    osc.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-
-    osc.start();
-    osc.stop(audioCtx.currentTime + duration);
-  }
-
-  function playSound(type) {
-    if (type === 'paddle') playTone(440, 'square', 0.1);    // High beep
-    if (type === 'wall') playTone(220, 'square', 0.1);      // Low beep
-    if (type === 'score') playTone(880, 'square', 0.15);    // Very high success beep
-    if (type === 'gameover') playTone(110, 'sawtooth', 0.5); // Deep buzz
-  }
-
-  // Game Speed Tuning (Spectate Mode only)
-  let timeScale = 1.0;
-  let speedNotificationTimer = 0;
-
-  // Paddles Configuration (AI and Player maximum speed matched at 8)
-  const player = {
-    x: 250, y: 750, width: 100, height: 14, speed: 8,
-    currentTargetX: 300
-  };
-
-  const ai = {
-    x: 250, y: 40, width: 100, height: 14, speed: 8,
-    currentTargetX: 300
-  };
-
-  // Ball Configuration
-  const INITIAL_BALL_SPEED = 5.5;
-  const ball = { x: 300, y: 400, radius: 8, vx: 0, vy: 0, speed: INITIAL_BALL_SPEED };
-
-  // Key tracking
-  const keys = { ArrowLeft: false, ArrowRight: false, KeyA: false, KeyD: false };
-
-  // Universal Input Tracking (Mouse & Multi-Touch)
-  let mouseActive = false;
-  let mouseTouchPoint = { x: 0, y: 0 };
-  let touchPoints = [];
-
-  window.addEventListener('keydown', (e) => {
-    initAudio(); // Initialize audio context on first interaction
-    if (e.code in keys) keys[e.code] = true;
-
-    if (e.code === 'Escape') gameState = 'START';
-    if (e.code === 'KeyR' && gameMode) startNewGame(gameMode);
-    if (e.key === '1') startNewGame(1);
-    if (e.key === '2') startNewGame(2);
-    if (e.key === '3') startNewGame(3);
-    if (e.key === '4') startNewGame(4);
-
-    if (gameState === 'PLAYING' && gameMode === 3) {
-      if (e.code === 'ArrowUp' || e.code === 'ArrowRight') {
-        timeScale = Math.min(5.0, timeScale + 0.5);
-        speedNotificationTimer = 90;
-      } else if (e.code === 'ArrowDown' || e.code === 'ArrowLeft') {
-        timeScale = Math.max(0.5, timeScale - 0.5);
-        speedNotificationTimer = 90;
-      }
-    }
-  });
-
-  window.addEventListener('keyup', (e) => {
-    if (e.code in keys) keys[e.code] = false;
-  });
-
-  // Updated Main Buttons with 4th Mode
-  const mainButtons = [
-    { mode: 1, x: 100, y: 220, w: 400, h: 60, title: "1: WALL MODE", desc: "Classic Solo Bounce" },
-    { mode: 2, x: 100, y: 300, w: 400, h: 60, title: "2: AI MODE", desc: "VS Dynamic Machine" },
-    { mode: 3, x: 100, y: 380, w: 400, h: 60, title: "3: BOTS ONLY", desc: "Spectate / Zero Player" },
-    { mode: 4, x: 100, y: 460, w: 400, h: 60, title: "4: LOCAL PVP", desc: "2-Player Shared Screen" },
-    { mode: 'settings', x: 100, y: 540, w: 400, h: 60, title: "SETTINGS", desc: "Controls & Audio/Video" }
-  ];
-
-  // Extensible Settings System
-  const settingsTabs = [
-    { id: 'controls', x: 40, y: 200, w: 160, h: 50, title: "CONTROLS" },
-    { id: 'av', x: 40, y: 270, w: 160, h: 50, title: "A/V CONFIG" },
-    { id: 'back', x: 40, y: 650, w: 160, h: 50, title: "BACK" }
-  ];
-  let activeSettingTab = 'controls';
-
-  // Dynamic Interactive Options inside tabs
-  const avOptions = [
-    {
-      id: 'toggleSound', x: 240, y: 240, w: 300, h: 45,
-      label: () => soundEnabled ? "SOUND: ENABLED" : "SOUND: MUTED",
-      color: () => soundEnabled ? COLOR_BALL : '#ff3333'
-    },
-    {
-      id: 'toggleCRT', x: 240, y: 310, w: 300, h: 45,
-      label: () => crtEnabled ? "CRT SHADER: ON" : "CRT SHADER: OFF",
-      color: () => crtEnabled ? COLOR_BALL : '#ff3333'
-    }
-  ];
-
-  function handleMenuClick(canvasX, canvasY) {
-    initAudio();
-    if (gameState === 'START') {
-      for (let btn of mainButtons) {
-        if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
-          playSound('paddle');
-          if (btn.mode === 'settings') gameState = 'SETTINGS';
-          else startNewGame(btn.mode);
-          return;
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
-      }
-    } else if (gameState === 'SETTINGS') {
-      // Check sidebar tabs
-      for (let tab of settingsTabs) {
-        if (canvasX >= tab.x && canvasX <= tab.x + tab.w && canvasY >= tab.y && canvasY <= tab.y + tab.h) {
-          playSound('wall');
-          if (tab.id === 'back') gameState = 'START';
-          else activeSettingTab = tab.id;
-          return;
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
         }
-      }
-      // Check dynamic tab content
-      if (activeSettingTab === 'av') {
-        for (let opt of avOptions) {
-          if (canvasX >= opt.x && canvasX <= opt.x + opt.w && canvasY >= opt.y && canvasY <= opt.y + opt.h) {
-            if (opt.id === 'toggleSound') {
-              soundEnabled = !soundEnabled;
-              playSound('paddle');
-            } else if (opt.id === 'toggleCRT') {
-              crtEnabled = !crtEnabled;
-              playSound('paddle');
-            }
-          }
-        }
-      }
-    } else if (gameState === 'GAMEOVER') {
-      playSound('wall');
-      gameState = 'START';
     }
-  }
 
-  // Pointer event translation based strictly on game canvas's logical coordinate grid (600x800)
-  function getCanvasPoint(clientX, clientY) {
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (clientX - rect.left) * (logicalWidth / rect.width),
-      y: (clientY - rect.top) * (logicalHeight / rect.height)
+    function playTone(freq, type, duration) {
+        if (!soundEnabled || !audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    }
+
+    function playSound(type) {
+        if (type === 'paddle') playTone(440, 'square', 0.1);    // High beep
+        if (type === 'wall') playTone(220, 'square', 0.1);      // Low beep
+        if (type === 'score') playTone(880, 'square', 0.15);    // Very high success beep
+        if (type === 'gameover') playTone(110, 'sawtooth', 0.5); // Deep buzz
+    }
+
+    // Game Speed Tuning (Spectate Mode only)
+    let timeScale = 1.0;
+    let speedNotificationTimer = 0;
+
+    // Paddles Configuration (AI and Player maximum speed matched at 8)
+    const player = {
+        x: 250, y: 750, width: 100, height: 14, speed: 8,
+        currentTargetX: 300
     };
-  }
 
-  // Mouse Listeners
-  canvas.addEventListener('mousedown', (e) => {
-    const pt = getCanvasPoint(e.clientX, e.clientY);
-    handleMenuClick(pt.x, pt.y);
-    mouseActive = true;
-    mouseTouchPoint = pt;
-  });
-  window.addEventListener('mousemove', (e) => {
-    if (mouseActive) mouseTouchPoint = getCanvasPoint(e.clientX, e.clientY);
-  });
-  window.addEventListener('mouseup', () => mouseActive = false);
+    const ai = {
+        x: 250, y: 40, width: 100, height: 14, speed: 8,
+        currentTargetX: 300
+    };
 
-  // Touch Listeners (Supports Multi-Touch for Local PvP)
-  canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
-    // Trigger clicks using the first touch
-    if (e.touches.length > 0) {
-      const pt = getCanvasPoint(e.touches[0].clientX, e.touches[0].clientY);
-      handleMenuClick(pt.x, pt.y);
-    }
-  }, { passive: false });
+    // Ball Configuration
+    const INITIAL_BALL_SPEED = 5.5;
+    const ball = { x: 300, y: 400, radius: 8, vx: 0, vy: 0, speed: INITIAL_BALL_SPEED };
 
-  window.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
-  }, { passive: false });
+    // Key tracking
+    const keys = { ArrowLeft: false, ArrowRight: false, KeyA: false, KeyD: false };
 
-  window.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
-  }, { passive: false });
+    // Universal Input Tracking (Mouse & Multi-Touch)
+    let mouseActive = false;
+    let mouseTouchPoint = { x: 0, y: 0 };
+    let touchPoints = [];
 
+    window.addEventListener('keydown', (e) => {
+        initAudio(); // Initialize audio context on first interaction
+        if (e.code in keys) keys[e.code] = true;
 
-  function startNewGame(mode) {
-    gameMode = mode;
-    score = 0;
-    scoreP1 = 0;
-    scoreP2 = 0;
-    winnerMode4 = 0;
-    gameState = 'PLAYING';
-    timeScale = 1.0;
-    speedNotificationTimer = 0;
-    player.x = (logicalWidth - player.width) / 2;
-    ai.x = (logicalWidth - ai.width) / 2;
-    ai.currentTargetX = logicalWidth / 2;
-    player.currentTargetX = logicalWidth / 2;
-    resetBall();
-  }
+        if (e.code === 'Escape') gameState = 'START';
+        if (e.code === 'KeyR' && gameMode) startNewGame(gameMode);
+        if (e.key === '1') startNewGame(1);
+        if (e.key === '2') startNewGame(2);
+        if (e.key === '3') startNewGame(3);
+        if (e.key === '4') startNewGame(4);
 
-  function resetBall(keepSpeed = false, forcedDirection = null) {
-    ball.x = logicalWidth / 2;
-    ball.y = logicalHeight / 2;
-    ballTrail.length = 0; // Wipe trail representation on resets
-
-    if (!keepSpeed) {
-      ball.speed = INITIAL_BALL_SPEED;
-    }
-
-    // Serve randomly or towards loser
-    const angle = (Math.random() * 50 - 25) * Math.PI / 180;
-    const direction = forcedDirection !== null ? forcedDirection : (Math.random() > 0.5 ? 1 : -1);
-    ball.vx = ball.speed * Math.sin(angle);
-    ball.vy = ball.speed * Math.cos(angle) * direction;
-  }
-
-  function handlePaddleBounce(paddle, isBottomPaddle) {
-    playSound('paddle');
-    triggerShake(4, 7); // Subtle crisp spring impact screen shake
-    createSparks(ball.x, ball.y, COLOR_BALL); // Burst spark particles
-
-    if (isBottomPaddle || gameMode === 3 || gameMode === 4) {
-      if (gameMode !== 4) score++;
-      if (ball.speed < 24) ball.speed *= 1.05;
-    }
-
-    ball.vy = (isBottomPaddle ? -1 : 1) * Math.abs(ball.vy);
-
-    const paddleCenter = paddle.x + paddle.width / 2;
-    let relativeIntersect = (ball.x - paddleCenter) / (paddle.width / 2);
-    relativeIntersect = Math.max(-1, Math.min(1, relativeIntersect));
-
-    ball.vx += relativeIntersect * (ball.speed * 0.5);
-
-    const maxHorizontalSpeed = ball.speed * 0.85;
-    ball.vx = Math.max(-maxHorizontalSpeed, Math.min(maxHorizontalSpeed, ball.vx));
-
-    const currentMag = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
-    ball.vx = (ball.vx / currentMag) * ball.speed;
-    ball.vy = (ball.vy / currentMag) * ball.speed;
-
-    if (isBottomPaddle) {
-      ball.y = paddle.y - ball.radius;
-    } else {
-      ball.y = paddle.y + paddle.height + ball.radius;
-    }
-  }
-
-  function triggerGameOver(mode4Winner = null) {
-    gameState = 'GAMEOVER';
-    playSound('gameover');
-    triggerShake(12, 22); // Solid game-over physical screen shake
-
-    if (gameMode === 1 && score > highScoreMode1) {
-      highScoreMode1 = score;
-      updateHighScore(1, highScoreMode1);
-    } else if (gameMode === 2 && score > highScoreMode2) {
-      highScoreMode2 = score;
-      updateHighScore(2, highScoreMode2);
-    }
-
-    if (gameMode === 4 && mode4Winner) {
-      winnerMode4 = mode4Winner;
-    }
-  }
-
-  function update() {
-    updateVisualEffects();
-
-    if (gameState !== 'PLAYING') return;
-
-    // Combine active input points
-    let inputs = [...touchPoints];
-    if (mouseActive) inputs.push(mouseTouchPoint);
-
-    // --- 1. Move Paddles ---
-    if (gameMode === 3) {
-      // Mode 3: Bottom Bot Tracking (With lazy return logic)
-      let idealTargetBallX;
-      let activeSpeed = player.speed;
-      let lerpFactor = 0.2;
-
-      if (ball.vy > 0) {
-        // Tracking active ball
-        const dt = (player.y - ball.y) / ball.vy;
-        const rawFutureX = ball.x + ball.vx * dt;
-        const radius = ball.radius;
-        const W = logicalWidth - (2 * radius);
-        let x_rel = rawFutureX - radius;
-        if (x_rel < 0) x_rel += (Math.ceil(Math.abs(x_rel) / W) + 1) * W;
-        const numBounces = Math.floor(x_rel / W);
-        const futureX = (numBounces % 2 === 0) ? (x_rel % W + radius) : (logicalWidth - radius - x_rel % W);
-
-        const lookaheadFactor = Math.min(1, 0.15 + 0.85 * Math.pow(score / 25, 0.75));
-        idealTargetBallX = (ball.x * (1 - lookaheadFactor)) + (futureX * lookaheadFactor);
-      } else {
-        // Lazy return to center
-        idealTargetBallX = logicalWidth / 2;
-        activeSpeed = player.speed * 0.3; // Moves lazily
-        lerpFactor = 0.05;               // Slowly shifts target alignment
-      }
-      player.currentTargetX += (idealTargetBallX - player.currentTargetX) * lerpFactor * timeScale;
-      const distanceToTarget = (player.currentTargetX - (player.width / 2)) - player.x;
-      let moveAmount = Math.max(-activeSpeed, Math.min(activeSpeed, distanceToTarget * 0.3));
-      player.x += moveAmount * timeScale;
-
-    } else if (gameMode === 4) {
-      // Mode 4: True Multi-Touch / Dual Keyboard
-      let p1Touched = false, p2Touched = false;
-      for (let pt of inputs) {
-        if (pt.y > logicalHeight / 2) { // Bottom Half -> P1
-          player.x += (pt.x - player.width / 2 - player.x) * 0.25;
-          p1Touched = true;
-        } else { // Top Half -> P2
-          ai.x += (pt.x - ai.width / 2 - ai.x) * 0.25;
-          p2Touched = true;
+        if (gameState === 'PLAYING' && gameMode === 3) {
+            if (e.code === 'ArrowUp' || e.code === 'ArrowRight') {
+                timeScale = Math.min(5.0, timeScale + 0.5);
+                speedNotificationTimer = 90;
+            } else if (e.code === 'ArrowDown' || e.code === 'ArrowLeft') {
+                timeScale = Math.max(0.5, timeScale - 0.5);
+                speedNotificationTimer = 90;
+            }
         }
-      }
-      if (!p1Touched) {
-        if (keys.ArrowLeft) player.x -= player.speed;
-        if (keys.ArrowRight) player.x += player.speed;
-      }
-      if (!p2Touched) {
-        if (keys.KeyA) ai.x -= ai.speed;
-        if (keys.KeyD) ai.x += ai.speed;
-      }
-    } else {
-      // Modes 1 & 2: Single Player Input
-      if (inputs.length > 0) {
-        const pt = inputs[inputs.length - 1];
-        player.x += (pt.x - player.width / 2 - player.x) * 0.25;
-      } else {
-        if (keys.ArrowLeft || keys.KeyA) player.x -= player.speed;
-        if (keys.ArrowRight || keys.KeyD) player.x += player.speed;
-      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        if (e.code in keys) keys[e.code] = false;
+    });
+
+    // Updated Main Buttons with 4th Mode
+    const mainButtons = [
+        { mode: 1, x: 100, y: 220, w: 400, h: 60, title: "1: WALL MODE", desc: "Classic Solo Bounce" },
+        { mode: 2, x: 100, y: 300, w: 400, h: 60, title: "2: AI MODE", desc: "VS Dynamic Machine" },
+        { mode: 3, x: 100, y: 380, w: 400, h: 60, title: "3: BOTS ONLY", desc: "Spectate / Zero Player" },
+        { mode: 4, x: 100, y: 460, w: 400, h: 60, title: "4: LOCAL PVP", desc: "2-Player Shared Screen" },
+        { mode: 'settings', x: 100, y: 540, w: 400, h: 60, title: "SETTINGS", desc: "Controls & Audio/Video" }
+    ];
+
+    // Extensible Settings System
+    const settingsTabs = [
+        { id: 'controls', x: 40, y: 200, w: 160, h: 50, title: "CONTROLS" },
+        { id: 'av', x: 40, y: 270, w: 160, h: 50, title: "A/V CONFIG" },
+        { id: 'back', x: 40, y: 650, w: 160, h: 50, title: "BACK" }
+    ];
+    let activeSettingTab = 'controls';
+
+    // Dynamic Interactive Options inside tabs
+    const avOptions = [
+        {
+            id: 'toggleSound', x: 240, y: 240, w: 300, h: 45,
+            label: () => soundEnabled ? "SOUND: ENABLED" : "SOUND: MUTED",
+            color: () => soundEnabled ? COLOR_BALL : '#ff3333'
+        },
+        {
+            id: 'toggleCRT', x: 240, y: 310, w: 300, h: 45,
+            label: () => crtEnabled ? "CRT SHADER: ON" : "CRT SHADER: OFF",
+            color: () => crtEnabled ? COLOR_BALL : '#ff3333'
+        }
+    ];
+
+    function handleMenuClick(canvasX, canvasY) {
+        initAudio();
+        if (gameState === 'START') {
+            for (let btn of mainButtons) {
+                if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+                    playSound('paddle');
+                    if (btn.mode === 'settings') gameState = 'SETTINGS';
+                    else startNewGame(btn.mode);
+                    return;
+                }
+            }
+        } else if (gameState === 'SETTINGS') {
+            // Check sidebar tabs
+            for (let tab of settingsTabs) {
+                if (canvasX >= tab.x && canvasX <= tab.x + tab.w && canvasY >= tab.y && canvasY <= tab.y + tab.h) {
+                    playSound('wall');
+                    if (tab.id === 'back') gameState = 'START';
+                    else activeSettingTab = tab.id;
+                    return;
+                }
+            }
+            // Check dynamic tab content
+            if (activeSettingTab === 'av') {
+                for (let opt of avOptions) {
+                    if (canvasX >= opt.x && canvasX <= opt.x + opt.w && canvasY >= opt.y && canvasY <= opt.y + opt.h) {
+                        if (opt.id === 'toggleSound') {
+                            soundEnabled = !soundEnabled;
+                            playSound('paddle');
+                        } else if (opt.id === 'toggleCRT') {
+                            crtEnabled = !crtEnabled;
+                            playSound('paddle');
+                        }
+                    }
+                }
+            }
+        } else if (gameState === 'GAMEOVER') {
+            playSound('wall');
+            gameState = 'START';
+        }
     }
-    player.x = Math.max(0, Math.min(logicalWidth - player.width, player.x));
 
-    // --- 2. Move Top AI Opponent (Modes 2 & 3 with lazy return logic) ---
-    if (gameMode === 2 || gameMode === 3) {
-      let idealTargetBallX;
-      let activeSpeed = ai.speed;
-      let lerpFactor = 0.2;
-
-      if (ball.vy < 0) {
-        // Tracking active ball
-        const dt = ((ai.y + ai.height) - ball.y) / ball.vy;
-        const rawFutureX = ball.x + ball.vx * dt;
-        const W = logicalWidth - (2 * ball.radius);
-        let x_rel = rawFutureX - ball.radius;
-        if (x_rel < 0) x_rel += (Math.ceil(Math.abs(x_rel) / W) + 1) * W;
-        const numBounces = Math.floor(x_rel / W);
-        const futureX = (numBounces % 2 === 0) ? (x_rel % W + ball.radius) : (logicalWidth - ball.radius - x_rel % W);
-
-        const lookaheadFactor = Math.min(1, 0.15 + 0.85 * Math.pow(score / 25, 0.75));
-        idealTargetBallX = (ball.x * (1 - lookaheadFactor)) + (futureX * lookaheadFactor);
-      } else {
-        // Lazy return to center
-        idealTargetBallX = logicalWidth / 2;
-        activeSpeed = ai.speed * 0.3; // Limit speed to 30% when relaxing back to center
-        lerpFactor = 0.05;           // Slow, lazy interpolation factor
-      }
-
-      ai.currentTargetX += (idealTargetBallX - ai.currentTargetX) * lerpFactor * timeScale;
-      const distanceToTarget = (ai.currentTargetX - (ai.width / 2)) - ai.x;
-      let moveAmount = Math.max(-activeSpeed, Math.min(activeSpeed, distanceToTarget * 0.3));
-
-      ai.x += moveAmount * timeScale;
-      ai.x = Math.max(0, Math.min(logicalWidth - ai.width, ai.x));
-    } else if (gameMode === 4) {
-      ai.x = Math.max(0, Math.min(logicalWidth - ai.width, ai.x));
+    // Pointer event translation based strictly on game canvas's logical coordinate grid (600x800)
+    function getCanvasPoint(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: (clientX - rect.left) * (logicalWidth / rect.width),
+            y: (clientY - rect.top) * (logicalHeight / rect.height)
+        };
     }
 
-    // --- 3. Move Ball (Continuous Collision Detection) ---
-    let moveDist = Math.sqrt((ball.vx * timeScale) ** 2 + (ball.vy * timeScale) ** 2);
-    let steps = Math.max(1, Math.ceil(moveDist / ball.radius));
-    let stepX = (ball.vx * timeScale) / steps;
-    let stepY = (ball.vy * timeScale) / steps;
+    // Mouse Listeners
+    canvas.addEventListener('mousedown', (e) => {
+        const pt = getCanvasPoint(e.clientX, e.clientY);
+        handleMenuClick(pt.x, pt.y);
+        mouseActive = true;
+        mouseTouchPoint = pt;
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (mouseActive) mouseTouchPoint = getCanvasPoint(e.clientX, e.clientY);
+    });
+    window.addEventListener('mouseup', () => mouseActive = false);
 
-    for (let i = 0; i < steps; i++) {
-      ball.x += stepX;
-      ball.y += stepY;
-      let bounced = false;
+    // Touch Listeners (Supports Multi-Touch for Local PvP)
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
+        // Trigger clicks using the first touch
+        if (e.touches.length > 0) {
+            const pt = getCanvasPoint(e.touches[0].clientX, e.touches[0].clientY);
+            handleMenuClick(pt.x, pt.y);
+        }
+    }, { passive: false });
 
-      // Wall Collisions
-      if (ball.x - ball.radius <= 0) {
-        ball.x = ball.radius;
-        ball.vx = Math.abs(ball.vx);
-        bounced = true;
-        playSound('wall');
-        triggerShake(2.5, 4);
-        createSparks(ball.x, ball.y, '#ffffff');
-      } else if (ball.x + ball.radius >= logicalWidth) {
-        ball.x = logicalWidth - ball.radius;
-        ball.vx = -Math.abs(ball.vx);
-        bounced = true;
-        playSound('wall');
-        triggerShake(2.5, 4);
-        createSparks(ball.x, ball.y, '#ffffff');
-      }
+    window.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
+    }, { passive: false });
 
-      // Top Boundary Rules
-      if (gameMode === 1 && ball.y - ball.radius <= 0) {
-        ball.y = ball.radius;
-        ball.vy = Math.abs(ball.vy);
-        bounced = true;
-        playSound('wall');
-        triggerShake(2.5, 4);
-        createSparks(ball.x, ball.y, '#ffffff');
-      } else if ((gameMode === 2 || gameMode === 3 || gameMode === 4) && ball.y + ball.radius < 0) {
-        if (gameMode === 2) {
-          score += 5;
-          playSound('score');
-          triggerShake(7, 12);
-          createSparks(ball.x, 0, COLOR_BALL);
-          resetBall(true);
-          break;
+    window.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
+    }, { passive: false });
+
+
+    function startNewGame(mode) {
+        gameMode = mode;
+        score = 0;
+        scoreP1 = 0;
+        scoreP2 = 0;
+        winnerMode4 = 0;
+        gameState = 'PLAYING';
+        timeScale = 1.0;
+        speedNotificationTimer = 0;
+        player.x = (logicalWidth - player.width) / 2;
+        ai.x = (logicalWidth - ai.width) / 2;
+        ai.currentTargetX = logicalWidth / 2;
+        player.currentTargetX = logicalWidth / 2;
+        resetBall();
+    }
+
+    function resetBall(keepSpeed = false, forcedDirection = null) {
+        ball.x = logicalWidth / 2;
+        ball.y = logicalHeight / 2;
+        ballTrail.length = 0; // Wipe trail representation on resets
+
+        if (!keepSpeed) {
+            ball.speed = INITIAL_BALL_SPEED;
+        }
+
+        // Serve randomly or towards loser
+        const angle = (Math.random() * 50 - 25) * Math.PI / 180;
+        const direction = forcedDirection !== null ? forcedDirection : (Math.random() > 0.5 ? 1 : -1);
+        ball.vx = ball.speed * Math.sin(angle);
+        ball.vy = ball.speed * Math.cos(angle) * direction;
+    }
+
+    function handlePaddleBounce(paddle, isBottomPaddle) {
+        playSound('paddle');
+        triggerShake(4, 7); // Subtle crisp spring impact screen shake
+        createSparks(ball.x, ball.y, COLOR_BALL); // Burst spark particles
+
+        if (isBottomPaddle || gameMode === 3 || gameMode === 4) {
+            if (gameMode !== 4) score++;
+            if (ball.speed < 24) ball.speed *= 1.05;
+        }
+
+        ball.vy = (isBottomPaddle ? -1 : 1) * Math.abs(ball.vy);
+
+        const paddleCenter = paddle.x + paddle.width / 2;
+        let relativeIntersect = (ball.x - paddleCenter) / (paddle.width / 2);
+        relativeIntersect = Math.max(-1, Math.min(1, relativeIntersect));
+
+        ball.vx += relativeIntersect * (ball.speed * 0.5);
+
+        const maxHorizontalSpeed = ball.speed * 0.85;
+        ball.vx = Math.max(-maxHorizontalSpeed, Math.min(maxHorizontalSpeed, ball.vx));
+
+        const currentMag = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+        ball.vx = (ball.vx / currentMag) * ball.speed;
+        ball.vy = (ball.vy / currentMag) * ball.speed;
+
+        if (isBottomPaddle) {
+            ball.y = paddle.y - ball.radius;
+        } else {
+            ball.y = paddle.y + paddle.height + ball.radius;
+        }
+    }
+
+    function triggerGameOver(mode4Winner = null) {
+        gameState = 'GAMEOVER';
+        playSound('gameover');
+        triggerShake(12, 22); // Solid game-over physical screen shake
+
+        if (gameMode === 1 && score > highScoreMode1) {
+            highScoreMode1 = score;
+            updateHighScore(1, highScoreMode1);
+        } else if (gameMode === 2 && score > highScoreMode2) {
+            highScoreMode2 = score;
+            updateHighScore(2, highScoreMode2);
+        }
+
+        if (gameMode === 4 && mode4Winner) {
+            winnerMode4 = mode4Winner;
+        }
+    }
+
+    function update() {
+        updateVisualEffects();
+
+        if (gameState !== 'PLAYING') return;
+
+        // Combine active input points
+        let inputs = [...touchPoints];
+        if (mouseActive) inputs.push(mouseTouchPoint);
+
+        // --- 1. Move Paddles ---
+        if (gameMode === 3) {
+            // Mode 3: Bottom Bot Tracking (With lazy return logic)
+            let idealTargetBallX;
+            let activeSpeed = player.speed;
+            let lerpFactor = 0.2;
+
+            if (ball.vy > 0) {
+                // Tracking active ball
+                const dt = (player.y - ball.y) / ball.vy;
+                const rawFutureX = ball.x + ball.vx * dt;
+                const radius = ball.radius;
+                const W = logicalWidth - (2 * radius);
+                let x_rel = rawFutureX - radius;
+                if (x_rel < 0) x_rel += (Math.ceil(Math.abs(x_rel) / W) + 1) * W;
+                const numBounces = Math.floor(x_rel / W);
+                const futureX = (numBounces % 2 === 0) ? (x_rel % W + radius) : (logicalWidth - radius - x_rel % W);
+
+                const lookaheadFactor = Math.min(1, 0.15 + 0.85 * Math.pow(score / 25, 0.75));
+                idealTargetBallX = (ball.x * (1 - lookaheadFactor)) + (futureX * lookaheadFactor);
+            } else {
+                // Lazy return to center
+                idealTargetBallX = logicalWidth / 2;
+                activeSpeed = player.speed * 0.3; // Moves lazily
+                lerpFactor = 0.05;               // Slowly shifts target alignment
+            }
+            player.currentTargetX += (idealTargetBallX - player.currentTargetX) * lerpFactor * timeScale;
+            const distanceToTarget = (player.currentTargetX - (player.width / 2)) - player.x;
+            let moveAmount = Math.max(-activeSpeed, Math.min(activeSpeed, distanceToTarget * 0.3));
+            player.x += moveAmount * timeScale;
+
         } else if (gameMode === 4) {
-          scoreP1++;
-          playSound('score');
-          triggerShake(7, 12);
-          createSparks(ball.x, 0, COLOR_BALL);
-          if (scoreP1 >= MAX_SCORE) triggerGameOver(1);
-          else resetBall(false, -1); // Serve UP towards P2 who just lost the point
-          break;
+            // Mode 4: True Multi-Touch / Dual Keyboard
+            let p1Touched = false, p2Touched = false;
+            for (let pt of inputs) {
+                if (pt.y > logicalHeight / 2) { // Bottom Half -> P1
+                    player.x += (pt.x - player.width / 2 - player.x) * 0.25;
+                    p1Touched = true;
+                } else { // Top Half -> P2
+                    ai.x += (pt.x - ai.width / 2 - ai.x) * 0.25;
+                    p2Touched = true;
+                }
+            }
+            if (!p1Touched) {
+                if (keys.ArrowLeft) player.x -= player.speed;
+                if (keys.ArrowRight) player.x += player.speed;
+            }
+            if (!p2Touched) {
+                if (keys.KeyA) ai.x -= ai.speed;
+                if (keys.KeyD) ai.x += ai.speed;
+            }
         } else {
-          triggerGameOver();
-          break;
+            // Modes 1 & 2: Single Player Input
+            if (inputs.length > 0) {
+                const pt = inputs[inputs.length - 1];
+                player.x += (pt.x - player.width / 2 - player.x) * 0.25;
+            } else {
+                if (keys.ArrowLeft || keys.KeyA) player.x -= player.speed;
+                if (keys.ArrowRight || keys.KeyD) player.x += player.speed;
+            }
         }
-      }
+        player.x = Math.max(0, Math.min(logicalWidth - player.width, player.x));
 
-      // Top Paddle Collision
-      if ((gameMode === 2 || gameMode === 3 || gameMode === 4) && ball.vy < 0) {
-        if (ball.y - ball.radius <= ai.y + ai.height && ball.y + ball.radius >= ai.y &&
-                ball.x + ball.radius >= ai.x && ball.x - ball.radius <= ai.x + ai.width) {
-          handlePaddleBounce(ai, false);
-          bounced = true;
+        // --- 2. Move Top AI Opponent (Modes 2 & 3 with lazy return logic) ---
+        if (gameMode === 2 || gameMode === 3) {
+            let idealTargetBallX;
+            let activeSpeed = ai.speed;
+            let lerpFactor = 0.2;
+
+            if (ball.vy < 0) {
+                // Tracking active ball
+                const dt = ((ai.y + ai.height) - ball.y) / ball.vy;
+                const rawFutureX = ball.x + ball.vx * dt;
+                const W = logicalWidth - (2 * ball.radius);
+                let x_rel = rawFutureX - ball.radius;
+                if (x_rel < 0) x_rel += (Math.ceil(Math.abs(x_rel) / W) + 1) * W;
+                const numBounces = Math.floor(x_rel / W);
+                const futureX = (numBounces % 2 === 0) ? (x_rel % W + ball.radius) : (logicalWidth - ball.radius - x_rel % W);
+
+                const lookaheadFactor = Math.min(1, 0.15 + 0.85 * Math.pow(score / 25, 0.75));
+                idealTargetBallX = (ball.x * (1 - lookaheadFactor)) + (futureX * lookaheadFactor);
+            } else {
+                // Lazy return to center
+                idealTargetBallX = logicalWidth / 2;
+                activeSpeed = ai.speed * 0.3; // Limit speed to 30% when relaxing back to center
+                lerpFactor = 0.05;           // Slow, lazy interpolation factor
+            }
+
+            ai.currentTargetX += (idealTargetBallX - ai.currentTargetX) * lerpFactor * timeScale;
+            const distanceToTarget = (ai.currentTargetX - (ai.width / 2)) - ai.x;
+            let moveAmount = Math.max(-activeSpeed, Math.min(activeSpeed, distanceToTarget * 0.3));
+
+            ai.x += moveAmount * timeScale;
+            ai.x = Math.max(0, Math.min(logicalWidth - ai.width, ai.x));
+        } else if (gameMode === 4) {
+            ai.x = Math.max(0, Math.min(logicalWidth - ai.width, ai.x));
         }
-      }
 
-      // Bottom Paddle Collision
-      if (ball.vy > 0) {
-        if (ball.y + ball.radius >= player.y && ball.y - ball.radius <= player.y + player.height &&
-                ball.x + ball.radius >= player.x && ball.x - ball.radius <= player.x + player.width) {
-          handlePaddleBounce(player, true);
-          bounced = true;
+        // --- 3. Move Ball (Continuous Collision Detection) ---
+        let moveDist = Math.sqrt((ball.vx * timeScale) ** 2 + (ball.vy * timeScale) ** 2);
+        let steps = Math.max(1, Math.ceil(moveDist / ball.radius));
+        let stepX = (ball.vx * timeScale) / steps;
+        let stepY = (ball.vy * timeScale) / steps;
+
+        for (let i = 0; i < steps; i++) {
+            ball.x += stepX;
+            ball.y += stepY;
+            let bounced = false;
+
+            // Wall Collisions
+            if (ball.x - ball.radius <= 0) {
+                ball.x = ball.radius;
+                ball.vx = Math.abs(ball.vx);
+                bounced = true;
+                playSound('wall');
+                triggerShake(2.5, 4);
+                createSparks(ball.x, ball.y, '#ffffff');
+            } else if (ball.x + ball.radius >= logicalWidth) {
+                ball.x = logicalWidth - ball.radius;
+                ball.vx = -Math.abs(ball.vx);
+                bounced = true;
+                playSound('wall');
+                triggerShake(2.5, 4);
+                createSparks(ball.x, ball.y, '#ffffff');
+            }
+
+            // Top Boundary Rules
+            if (gameMode === 1 && ball.y - ball.radius <= 0) {
+                ball.y = ball.radius;
+                ball.vy = Math.abs(ball.vy);
+                bounced = true;
+                playSound('wall');
+                triggerShake(2.5, 4);
+                createSparks(ball.x, ball.y, '#ffffff');
+            } else if ((gameMode === 2 || gameMode === 3 || gameMode === 4) && ball.y + ball.radius < 0) {
+                if (gameMode === 2) {
+                    score += 5;
+                    playSound('score');
+                    triggerShake(7, 12);
+                    createSparks(ball.x, 0, COLOR_BALL);
+                    resetBall(true);
+                    break;
+                } else if (gameMode === 4) {
+                    scoreP1++;
+                    playSound('score');
+                    triggerShake(7, 12);
+                    createSparks(ball.x, 0, COLOR_BALL);
+                    if (scoreP1 >= MAX_SCORE) triggerGameOver(1);
+                    else resetBall(false, -1); // Serve UP towards P2 who just lost the point
+                    break;
+                } else {
+                    triggerGameOver();
+                    break;
+                }
+            }
+
+            // Top Paddle Collision
+            if ((gameMode === 2 || gameMode === 3 || gameMode === 4) && ball.vy < 0) {
+                if (ball.y - ball.radius <= ai.y + ai.height && ball.y + ball.radius >= ai.y &&
+                    ball.x + ball.radius >= ai.x && ball.x - ball.radius <= ai.x + ai.width) {
+                    handlePaddleBounce(ai, false);
+                    bounced = true;
+                }
+            }
+
+            // Bottom Paddle Collision
+            if (ball.vy > 0) {
+                if (ball.y + ball.radius >= player.y && ball.y - ball.radius <= player.y + player.height &&
+                    ball.x + ball.radius >= player.x && ball.x - ball.radius <= player.x + player.width) {
+                    handlePaddleBounce(player, true);
+                    bounced = true;
+                }
+            }
+
+            // Bottom Boundary Rule
+            if (ball.y - ball.radius > logicalHeight) {
+                if (gameMode === 4) {
+                    scoreP2++;
+                    playSound('score');
+                    triggerShake(7, 12);
+                    createSparks(ball.x, logicalHeight, COLOR_BALL);
+                    if (scoreP2 >= MAX_SCORE) triggerGameOver(2);
+                    else resetBall(false, 1); // Serve DOWN towards P1 who just lost the point
+                } else {
+                    triggerGameOver();
+                }
+                break;
+            }
+
+            if (bounced) {
+                stepX = (ball.vx * timeScale) / steps;
+                stepY = (ball.vy * timeScale) / steps;
+            }
         }
-      }
-
-      // Bottom Boundary Rule
-      if (ball.y - ball.radius > logicalHeight) {
-        if (gameMode === 4) {
-          scoreP2++;
-          playSound('score');
-          triggerShake(7, 12);
-          createSparks(ball.x, logicalHeight, COLOR_BALL);
-          if (scoreP2 >= MAX_SCORE) triggerGameOver(2);
-          else resetBall(false, 1); // Serve DOWN towards P1 who just lost the point
-        } else {
-          triggerGameOver();
-        }
-        break;
-      }
-
-      if (bounced) {
-        stepX = (ball.vx * timeScale) / steps;
-        stepY = (ball.vy * timeScale) / steps;
-      }
-    }
-  }
-
-  function draw() {
-    ctx.save();
-
-    // Execute Screen Shake translations
-    if (shakeTime > 0) {
-      const dx = (Math.random() - 0.5) * shakeIntensity;
-      const dy = (Math.random() - 0.5) * shakeIntensity;
-      ctx.translate(dx, dy);
-      shakeTime--;
-    }
-
-    ctx.fillStyle = COLOR_BG;
-    ctx.fillRect(0, 0, logicalWidth, logicalHeight);
-
-    if (gameState === 'START') {
-      ctx.fillStyle = COLOR_TEXT;
-      ctx.textAlign = 'center';
-
-      ctx.font = `28px ${FONT_FAMILY}`;
-      ctx.fillText("RETRO PONG", logicalWidth / 2, 140);
-
-      ctx.font = `12px ${FONT_FAMILY}`;
-      ctx.fillStyle = COLOR_MUTED;
-      ctx.fillText("SELECT YOUR SURVIVAL MODE", logicalWidth / 2, 180);
-
-      for (let btn of mainButtons) {
-        ctx.fillStyle = '#111111';
-        ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
-        ctx.strokeStyle = '#333333';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
-
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.textAlign = 'left';
-        ctx.font = `14px ${FONT_FAMILY}`;
-        ctx.fillText(btn.title, btn.x + 20, btn.y + 25);
-
-        ctx.fillStyle = COLOR_MUTED;
-        ctx.font = `9px ${FONT_FAMILY}`;
-        ctx.fillText(btn.desc, btn.x + 20, btn.y + 45);
-
-        if (btn.mode === 1) {
-          ctx.textAlign = 'right';
-          ctx.fillStyle = COLOR_BALL;
-          ctx.font = `10px ${FONT_FAMILY}`;
-          ctx.fillText(`BEST:${highScoreMode1}`, btn.x + btn.w - 20, btn.y + 35);
-        } else if (btn.mode === 2) {
-          ctx.textAlign = 'right';
-          ctx.fillStyle = COLOR_BALL;
-          ctx.font = `10px ${FONT_FAMILY}`;
-          ctx.fillText(`BEST:${highScoreMode2}`, btn.x + btn.w - 20, btn.y + 35);
-        }
-      }
-
-    } else if (gameState === 'SETTINGS') {
-      ctx.fillStyle = COLOR_TEXT;
-      ctx.textAlign = 'center';
-      ctx.font = `28px ${FONT_FAMILY}`;
-      ctx.fillText("SETTINGS", logicalWidth / 2, 120);
-
-      // Draw Sidebar Tabs
-      for (let tab of settingsTabs) {
-        ctx.fillStyle = activeSettingTab === tab.id ? '#444444' : '#151515';
-        ctx.fillRect(tab.x, tab.y, tab.w, tab.h);
-        ctx.strokeStyle = activeSettingTab === tab.id ? COLOR_BALL : '#333333';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(tab.x, tab.y, tab.w, tab.h);
-
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.textAlign = 'center';
-        ctx.font = `11px ${FONT_FAMILY}`;
-        ctx.fillText(tab.title, tab.x + (tab.w / 2), tab.y + (tab.h / 2) + 5);
-      }
-
-      // Draw Content Area
-      ctx.fillStyle = '#080808';
-      ctx.fillRect(220, 200, 340, 500);
-      ctx.strokeStyle = '#222222';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(220, 200, 340, 500);
-
-      ctx.fillStyle = COLOR_TEXT;
-      ctx.textAlign = 'left';
-
-      if (activeSettingTab === 'controls') {
-        ctx.font = `13px ${FONT_FAMILY}`;
-        ctx.fillStyle = COLOR_BALL;
-        ctx.fillText("PVP CONTROLS", 240, 240);
-
-        ctx.font = `9px ${FONT_FAMILY}`;
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.fillText("• BOTTOM PADDLE: ARROWS", 240, 275);
-        ctx.fillText("• TOP PADDLE: A/D", 240, 305);
-        ctx.fillText("• OR MULTI-TOUCH HALVES", 240, 335);
-
-        ctx.font = `13px ${FONT_FAMILY}`;
-        ctx.fillStyle = COLOR_BALL;
-        ctx.fillText("HOTKEYS", 240, 390);
-
-        ctx.font = `9px ${FONT_FAMILY}`;
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.fillText("• 1-4 : SWAP MODES", 240, 425);
-        ctx.fillText("• R   : RESTART RUN", 240, 455);
-        ctx.fillText("• ESC : MAIN MENU", 240, 485);
-
-        ctx.font = `13px ${FONT_FAMILY}`;
-        ctx.fillStyle = COLOR_BALL;
-        ctx.fillText("SPECTATOR (MODE 3)", 240, 540);
-
-        ctx.font = `9px ${FONT_FAMILY}`;
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.fillText("• ARROWS ADJUST SPEED", 240, 575);
-      } else if (activeSettingTab === 'av') {
-        // Render Dynamic AV Options
-        for (let opt of avOptions) {
-          ctx.fillStyle = opt.color();
-          ctx.fillRect(opt.x, opt.y, opt.w, opt.h);
-          ctx.fillStyle = '#000000';
-          ctx.textAlign = 'center';
-          ctx.font = `11px ${FONT_FAMILY}`;
-          ctx.fillText(opt.label(), opt.x + opt.w / 2, opt.y + opt.h / 2 + 5);
-        }
-      }
-
-    } else if (gameState === 'PLAYING') {
-      // Screen boundaries bezel border
-      ctx.strokeStyle = '#222222';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(2, 2, logicalWidth - 4, logicalHeight - 4);
-
-      if (gameMode === 4) {
-        // PvP Scores
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.font = `24px ${FONT_FAMILY}`;
-        ctx.textAlign = 'left';
-        ctx.fillText(`P2: ${scoreP2}`, 25, 45);
-        ctx.fillText(`P1: ${scoreP1}`, 25, 780);
-      } else {
-        // Single Player Score
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.font = `36px ${FONT_FAMILY}`;
-        ctx.textAlign = 'left';
-        ctx.fillText(score.toString(), 28, 95);
-      }
-
-      if (gameMode === 3 && speedNotificationTimer > 0) {
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.font = `14px ${FONT_FAMILY}`;
-        ctx.textAlign = 'right';
-        ctx.fillText(`SPEED: ${timeScale.toFixed(1)}x`, logicalWidth - 28, 95);
-        speedNotificationTimer--;
-      }
-
-      // Draw visual details (Trail and sparks)
-      drawVisualEffects();
-
-      // Draw bottom paddle
-      ctx.fillStyle = COLOR_PADDLE;
-      ctx.fillRect(player.x, player.y, player.width, player.height);
-
-      // Draw top paddle (Modes 2, 3, & 4)
-      if (gameMode === 2 || gameMode === 3 || gameMode === 4) {
-        ctx.fillStyle = COLOR_PADDLE;
-        ctx.fillRect(ai.x, ai.y, ai.width, ai.height);
-      }
-
-      // Draw Ball
-      ctx.fillStyle = COLOR_BALL;
-      ctx.fillRect(ball.x - ball.radius, ball.y - ball.radius, ball.radius * 2, ball.radius * 2);
-
-    } else if (gameState === 'GAMEOVER') {
-      ctx.fillStyle = COLOR_TEXT;
-      ctx.textAlign = 'center';
-
-      ctx.font = `24px ${FONT_FAMILY}`;
-      ctx.fillText("GAME OVER", logicalWidth / 2, 300);
-
-      ctx.font = `16px ${FONT_FAMILY}`;
-      ctx.fillStyle = COLOR_BALL;
-      if (gameMode === 4) {
-        ctx.fillText(`PLAYER ${winnerMode4} WINS!`, logicalWidth / 2, 350);
-        ctx.fillStyle = COLOR_TEXT;
-        ctx.fillText(`${scoreP1} - ${scoreP2}`, logicalWidth / 2, 380);
-      } else {
-        ctx.fillText(`FINAL SCORE: ${score}`, logicalWidth / 2, 360);
-      }
-
-      ctx.fillStyle = COLOR_MUTED;
-      ctx.font = `10px ${FONT_FAMILY}`;
-      ctx.fillText("PRESS [1]-[4] TO PLAY AGAIN", logicalWidth / 2, 440);
-      ctx.fillText("PRESS 'R' TO RESTART LAST RUN", logicalWidth / 2, 470);
-      ctx.fillText("TAP OR PRESS 'ESC' FOR MENU", logicalWidth / 2, 500);
     }
 
-    ctx.restore(); // Restores original non-shaken translation Matrix
+    function draw() {
+        ctx.save();
+        
+        // Execute Screen Shake translations
+        if (shakeTime > 0) {
+            const dx = (Math.random() - 0.5) * shakeIntensity;
+            const dy = (Math.random() - 0.5) * shakeIntensity;
+            ctx.translate(dx, dy);
+            shakeTime--;
+        }
 
-    // Apply scanline shader overlay over the rendered layout
-    drawCRTOverlay();
-  }
+        ctx.fillStyle = COLOR_BG;
+        ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
-  function tick() {
-    update();
-    draw();
-    requestAnimationFrame(tick);
-  }
+        if (gameState === 'START') {
+            ctx.fillStyle = COLOR_TEXT;
+            ctx.textAlign = 'center';
 
-  window.onload = function() {
-    resize(); // One final ensure size scaling calculation is absolute
-    tick();
-  }
+            ctx.font = `28px ${FONT_FAMILY}`;
+            ctx.fillText("RETRO PONG", logicalWidth / 2, 140);
+
+            ctx.font = `12px ${FONT_FAMILY}`;
+            ctx.fillStyle = COLOR_MUTED;
+            ctx.fillText("SELECT YOUR SURVIVAL MODE", logicalWidth / 2, 180);
+
+            for (let btn of mainButtons) {
+                ctx.fillStyle = '#111111';
+                ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+                ctx.strokeStyle = '#333333';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.textAlign = 'left';
+                ctx.font = `14px ${FONT_FAMILY}`;
+                ctx.fillText(btn.title, btn.x + 20, btn.y + 25);
+
+                ctx.fillStyle = COLOR_MUTED;
+                ctx.font = `9px ${FONT_FAMILY}`;
+                ctx.fillText(btn.desc, btn.x + 20, btn.y + 45);
+
+                if (btn.mode === 1) {
+                    ctx.textAlign = 'right';
+                    ctx.fillStyle = COLOR_BALL;
+                    ctx.font = `10px ${FONT_FAMILY}`;
+                    ctx.fillText(`BEST:${highScoreMode1}`, btn.x + btn.w - 20, btn.y + 35);
+                } else if (btn.mode === 2) {
+                    ctx.textAlign = 'right';
+                    ctx.fillStyle = COLOR_BALL;
+                    ctx.font = `10px ${FONT_FAMILY}`;
+                    ctx.fillText(`BEST:${highScoreMode2}`, btn.x + btn.w - 20, btn.y + 35);
+                }
+            }
+
+        } else if (gameState === 'SETTINGS') {
+            ctx.fillStyle = COLOR_TEXT;
+            ctx.textAlign = 'center';
+            ctx.font = `28px ${FONT_FAMILY}`;
+            ctx.fillText("SETTINGS", logicalWidth / 2, 120);
+
+            // Draw Sidebar Tabs
+            for (let tab of settingsTabs) {
+                ctx.fillStyle = activeSettingTab === tab.id ? '#444444' : '#151515';
+                ctx.fillRect(tab.x, tab.y, tab.w, tab.h);
+                ctx.strokeStyle = activeSettingTab === tab.id ? COLOR_BALL : '#333333';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(tab.x, tab.y, tab.w, tab.h);
+
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.textAlign = 'center';
+                ctx.font = `11px ${FONT_FAMILY}`;
+                ctx.fillText(tab.title, tab.x + (tab.w / 2), tab.y + (tab.h / 2) + 5);
+            }
+
+            // Draw Content Area
+            ctx.fillStyle = '#080808';
+            ctx.fillRect(220, 200, 340, 500);
+            ctx.strokeStyle = '#222222';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(220, 200, 340, 500);
+
+            ctx.fillStyle = COLOR_TEXT;
+            ctx.textAlign = 'left';
+
+            if (activeSettingTab === 'controls') {
+                ctx.font = `13px ${FONT_FAMILY}`;
+                ctx.fillStyle = COLOR_BALL;
+                ctx.fillText("PVP CONTROLS", 240, 240);
+
+                ctx.font = `9px ${FONT_FAMILY}`;
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.fillText("• BOTTOM PADDLE: ARROWS", 240, 275);
+                ctx.fillText("• TOP PADDLE: A/D", 240, 305);
+                ctx.fillText("• OR MULTI-TOUCH HALVES", 240, 335);
+
+                ctx.font = `13px ${FONT_FAMILY}`;
+                ctx.fillStyle = COLOR_BALL;
+                ctx.fillText("HOTKEYS", 240, 390);
+
+                ctx.font = `9px ${FONT_FAMILY}`;
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.fillText("• 1-4 : SWAP MODES", 240, 425);
+                ctx.fillText("• R   : RESTART RUN", 240, 455);
+                ctx.fillText("• ESC : MAIN MENU", 240, 485);
+
+                ctx.font = `13px ${FONT_FAMILY}`;
+                ctx.fillStyle = COLOR_BALL;
+                ctx.fillText("SPECTATOR (MODE 3)", 240, 540);
+
+                ctx.font = `9px ${FONT_FAMILY}`;
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.fillText("• ARROWS ADJUST SPEED", 240, 575);
+            } else if (activeSettingTab === 'av') {
+                // Render Dynamic AV Options
+                for (let opt of avOptions) {
+                    ctx.fillStyle = opt.color();
+                    ctx.fillRect(opt.x, opt.y, opt.w, opt.h);
+                    ctx.fillStyle = '#000000';
+                    ctx.textAlign = 'center';
+                    ctx.font = `11px ${FONT_FAMILY}`;
+                    ctx.fillText(opt.label(), opt.x + opt.w / 2, opt.y + opt.h / 2 + 5);
+                }
+            }
+
+        } else if (gameState === 'PLAYING') {
+            // Screen boundaries bezel border
+            ctx.strokeStyle = '#222222';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(2, 2, logicalWidth - 4, logicalHeight - 4);
+
+            if (gameMode === 4) {
+                // PvP Scores
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.font = `24px ${FONT_FAMILY}`;
+                ctx.textAlign = 'left';
+                ctx.fillText(`P2: ${scoreP2}`, 25, 45);
+                ctx.fillText(`P1: ${scoreP1}`, 25, 780);
+            } else {
+                // Single Player Score
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.font = `36px ${FONT_FAMILY}`;
+                ctx.textAlign = 'left';
+                ctx.fillText(score.toString(), 28, 95);
+            }
+
+            if (gameMode === 3 && speedNotificationTimer > 0) {
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.font = `14px ${FONT_FAMILY}`;
+                ctx.textAlign = 'right';
+                ctx.fillText(`SPEED: ${timeScale.toFixed(1)}x`, logicalWidth - 28, 95);
+                speedNotificationTimer--;
+            }
+
+            // Draw visual details (Trail and sparks)
+            drawVisualEffects();
+
+            // Draw bottom paddle
+            ctx.fillStyle = COLOR_PADDLE;
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+
+            // Draw top paddle (Modes 2, 3, & 4)
+            if (gameMode === 2 || gameMode === 3 || gameMode === 4) {
+                ctx.fillStyle = COLOR_PADDLE;
+                ctx.fillRect(ai.x, ai.y, ai.width, ai.height);
+            }
+
+            // Draw Ball
+            ctx.fillStyle = COLOR_BALL;
+            ctx.fillRect(ball.x - ball.radius, ball.y - ball.radius, ball.radius * 2, ball.radius * 2);
+
+        } else if (gameState === 'GAMEOVER') {
+            ctx.fillStyle = COLOR_TEXT;
+            ctx.textAlign = 'center';
+
+            ctx.font = `24px ${FONT_FAMILY}`;
+            ctx.fillText("GAME OVER", logicalWidth / 2, 300);
+
+            ctx.font = `16px ${FONT_FAMILY}`;
+            ctx.fillStyle = COLOR_BALL;
+            if (gameMode === 4) {
+                ctx.fillText(`PLAYER ${winnerMode4} WINS!`, logicalWidth / 2, 350);
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.fillText(`${scoreP1} - ${scoreP2}`, logicalWidth / 2, 380);
+            } else {
+                ctx.fillText(`FINAL SCORE: ${score}`, logicalWidth / 2, 360);
+            }
+
+            ctx.fillStyle = COLOR_MUTED;
+            ctx.font = `10px ${FONT_FAMILY}`;
+            ctx.fillText("PRESS [1]-[4] TO PLAY AGAIN", logicalWidth / 2, 440);
+            ctx.fillText("PRESS 'R' TO RESTART LAST RUN", logicalWidth / 2, 470);
+            ctx.fillText("TAP OR PRESS 'ESC' FOR MENU", logicalWidth / 2, 500);
+        }
+
+        ctx.restore(); // Restores original non-shaken translation Matrix
+
+        // Apply scanline shader overlay over the rendered layout
+        drawCRTOverlay();
+    }
+
+    function tick() {
+        update();
+        draw();
+        requestAnimationFrame(tick);
+    }
+
+    window.onload = function() {
+        resize(); // One final ensure size scaling calculation is absolute
+        tick();
+    }
 </script>
 </body>
 </html>
