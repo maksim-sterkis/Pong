@@ -55,6 +55,7 @@
     // Game States: 'START', 'PLAYING', 'GAMEOVER', 'SETTINGS'
     let gameState = 'START';
     let gameMode = null; // 1: Wall, 2: AI, 3: Spectate, 4: Local PvP
+    let isPaused = false;
     let score = 0;
 
     // Mode 4 PvP Variables
@@ -62,6 +63,9 @@
     let scoreP2 = 0;
     const MAX_SCORE = 11;
     let winnerMode4 = 0;
+
+    // AI Difficulty Configuration (EASY, MEDIUM, HARD)
+    let aiDifficulty = 'MEDIUM'; // Default
 
     // Load High Scores from Local Storage
     let highScoreMode1 = parseInt(localStorage.getItem('retroPongHighScore1')) || 0;
@@ -161,13 +165,13 @@
             }
         }
 
-        // Update trail
-        if (gameState === 'PLAYING') {
+        // Update trail (only when active and not paused)
+        if (gameState === 'PLAYING' && !isPaused) {
             ballTrail.push({ x: ball.x, y: ball.y });
             if (ballTrail.length > MAX_TRAIL_LENGTH) {
                 ballTrail.shift();
             }
-        } else {
+        } else if (gameState !== 'PLAYING') {
             ballTrail.length = 0;
         }
     }
@@ -256,15 +260,15 @@
     let timeScale = 1.0;
     let speedNotificationTimer = 0;
 
-    // Paddles Configuration (AI and Player maximum speed matched at 8)
+    // Paddles Configuration (Speed dynamically set based on Difficulty Tiers)
     const player = {
         x: 250, y: 750, width: 100, height: 14, speed: 8,
-        currentTargetX: 300
+        prevX: 250, currentTargetX: 300
     };
 
     const ai = {
         x: 250, y: 40, width: 100, height: 14, speed: 8,
-        currentTargetX: 300
+        prevX: 250, currentTargetX: 300
     };
 
     // Ball Configuration
@@ -279,18 +283,27 @@
     let mouseTouchPoint = { x: 0, y: 0 };
     let touchPoints = [];
 
+    // Pause toggle trigger
+    function togglePause() {
+        if (gameState === 'PLAYING') {
+            isPaused = !isPaused;
+            playSound('wall');
+        }
+    }
+
     window.addEventListener('keydown', (e) => {
         initAudio(); // Initialize audio context on first interaction
         if (e.code in keys) keys[e.code] = true;
 
         if (e.code === 'Escape') gameState = 'START';
+        if (e.code === 'KeyP') togglePause();
         if (e.code === 'KeyR' && gameMode) startNewGame(gameMode);
         if (e.key === '1') startNewGame(1);
         if (e.key === '2') startNewGame(2);
         if (e.key === '3') startNewGame(3);
         if (e.key === '4') startNewGame(4);
 
-        if (gameState === 'PLAYING' && gameMode === 3) {
+        if (gameState === 'PLAYING' && gameMode === 3 && !isPaused) {
             if (e.code === 'ArrowUp' || e.code === 'ArrowRight') {
                 timeScale = Math.min(5.0, timeScale + 0.5);
                 speedNotificationTimer = 90;
@@ -311,16 +324,24 @@
         { mode: 2, x: 100, y: 300, w: 400, h: 60, title: "2: AI MODE", desc: "VS Dynamic Machine" },
         { mode: 3, x: 100, y: 380, w: 400, h: 60, title: "3: BOTS ONLY", desc: "Spectate / Zero Player" },
         { mode: 4, x: 100, y: 460, w: 400, h: 60, title: "4: LOCAL PVP", desc: "2-Player Shared Screen" },
-        { mode: 'settings', x: 100, y: 540, w: 400, h: 60, title: "SETTINGS", desc: "Controls & Audio/Video" }
+        { mode: 'settings', x: 100, y: 540, w: 400, h: 60, title: "SETTINGS", desc: "Controls, AI & A/V Config" }
     ];
 
     // Extensible Settings System
     const settingsTabs = [
         { id: 'controls', x: 40, y: 200, w: 160, h: 50, title: "CONTROLS" },
-        { id: 'av', x: 40, y: 270, w: 160, h: 50, title: "A/V CONFIG" },
+        { id: 'difficulty', x: 40, y: 270, w: 160, h: 50, title: "DIFFICULTY" },
+        { id: 'av', x: 40, y: 340, w: 160, h: 50, title: "A/V CONFIG" },
         { id: 'back', x: 40, y: 650, w: 160, h: 50, title: "BACK" }
     ];
     let activeSettingTab = 'controls';
+
+    // Interactive Difficulty Buttons
+    const difficultyButtons = [
+        { id: 'EASY', x: 240, y: 240, w: 300, h: 50, label: "EASY" },
+        { id: 'MEDIUM', x: 240, y: 310, w: 300, h: 50, label: "MEDIUM" },
+        { id: 'HARD', x: 240, y: 380, w: 300, h: 50, label: "HARD" }
+    ];
 
     // Dynamic Interactive Options inside tabs
     const avOptions = [
@@ -357,7 +378,17 @@
                     return;
                 }
             }
-            // Check dynamic tab content
+            // Check dynamic difficulty content
+            if (activeSettingTab === 'difficulty') {
+                for (let btn of difficultyButtons) {
+                    if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+                        aiDifficulty = btn.id;
+                        playSound('paddle');
+                        return;
+                    }
+                }
+            }
+            // Check dynamic A/V content
             if (activeSettingTab === 'av') {
                 for (let opt of avOptions) {
                     if (canvasX >= opt.x && canvasX <= opt.x + opt.w && canvasY >= opt.y && canvasY <= opt.y + opt.h) {
@@ -398,12 +429,19 @@
     });
     window.addEventListener('mouseup', () => mouseActive = false);
 
-    // Touch Listeners (Supports Multi-Touch for Local PvP)
+    // Touch Listeners (Supports Multi-Touch for Local PvP and Two-Finger Pause)
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
         touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
+        
+        // Two-finger tap pauses the game
+        if (gameState === 'PLAYING' && e.touches.length === 2) {
+            togglePause();
+            return;
+        }
+
         // Trigger clicks using the first touch
-        if (e.touches.length > 0) {
+        if (e.touches.length > 0 && gameState !== 'PLAYING') {
             const pt = getCanvasPoint(e.touches[0].clientX, e.touches[0].clientY);
             handleMenuClick(pt.x, pt.y);
         }
@@ -427,10 +465,20 @@
         scoreP2 = 0;
         winnerMode4 = 0;
         gameState = 'PLAYING';
+        isPaused = false;
         timeScale = 1.0;
         speedNotificationTimer = 0;
+        
+        // Initialize AI speeds directly matching Difficulty Tiers
+        if (aiDifficulty === 'EASY') ai.speed = 5.0;
+        else if (aiDifficulty === 'MEDIUM') ai.speed = 8.0;
+        else ai.speed = 11.0;
+
         player.x = (logicalWidth - player.width) / 2;
         ai.x = (logicalWidth - ai.width) / 2;
+        player.prevX = player.x;
+        ai.prevX = ai.x;
+        
         ai.currentTargetX = logicalWidth / 2;
         player.currentTargetX = logicalWidth / 2;
         resetBall();
@@ -464,15 +512,36 @@
 
         ball.vy = (isBottomPaddle ? -1 : 1) * Math.abs(ball.vy);
 
+        // Standard Relative Intersect angle modification
         const paddleCenter = paddle.x + paddle.width / 2;
         let relativeIntersect = (ball.x - paddleCenter) / (paddle.width / 2);
         relativeIntersect = Math.max(-1, Math.min(1, relativeIntersect));
 
         ball.vx += relativeIntersect * (ball.speed * 0.5);
 
+        // Clamping absolute deflection limits
         const maxHorizontalSpeed = ball.speed * 0.85;
         ball.vx = Math.max(-maxHorizontalSpeed, Math.min(maxHorizontalSpeed, ball.vx));
 
+        // SPIN PHYSICS: Extract paddle's real-time physical momentum displacement
+        const paddleVelX = isBottomPaddle ? (player.x - player.prevX) : (ai.x - ai.prevX);
+        const spinMultiplier = 0.35; // Sensitivity calibration
+        const addedVx = paddleVelX * spinMultiplier;
+
+        // Apply additive momentum shift safely
+        const tempVx = ball.vx + addedVx;
+        
+        // Clamp to ensure spin can never double original vx magnitude or reverse its trajectory
+        if (ball.vx > 0) {
+            ball.vx = Math.max(ball.vx * 0.5, Math.min(ball.vx * 1.5, tempVx));
+        } else if (ball.vx < 0) {
+            ball.vx = Math.min(ball.vx * 0.5, Math.max(ball.vx * 1.5, tempVx));
+        } else {
+            // Static rest nudge
+            ball.vx = Math.max(-2, Math.min(2, addedVx));
+        }
+
+        // Renormalize velocity vector to preserve strict ball speed continuity
         const currentMag = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
         ball.vx = (ball.vx / currentMag) * ball.speed;
         ball.vy = (ball.vy / currentMag) * ball.speed;
@@ -506,10 +575,15 @@
         updateVisualEffects();
 
         if (gameState !== 'PLAYING') return;
+        if (isPaused) return; // Freeze execution when paused
 
         // Combine active input points
         let inputs = [...touchPoints];
         if (mouseActive) inputs.push(mouseTouchPoint);
+
+        // Track historical position states
+        player.prevX = player.x;
+        ai.prevX = ai.x;
 
         // --- 1. Move Paddles ---
         if (gameMode === 3) {
@@ -574,11 +648,15 @@
         }
         player.x = Math.max(0, Math.min(logicalWidth - player.width, player.x));
 
-        // --- 2. Move Top AI Opponent (Modes 2 & 3 with lazy return logic) ---
+        // --- 2. Move Top AI Opponent (Modes 2 & 3 with difficulty dynamics) ---
         if (gameMode === 2 || gameMode === 3) {
             let idealTargetBallX;
             let activeSpeed = ai.speed;
-            let lerpFactor = 0.2;
+            
+            // Adjust tracking interpolation sensitivity based strictly on Difficulty Tier
+            let lerpFactor = 0.2; 
+            if (aiDifficulty === 'EASY') lerpFactor = 0.08;
+            else if (aiDifficulty === 'HARD') lerpFactor = 0.32;
 
             if (ball.vy < 0) {
                 // Tracking active ball
@@ -810,15 +888,35 @@
                 ctx.fillStyle = COLOR_TEXT;
                 ctx.fillText("• 1-4 : SWAP MODES", 240, 425);
                 ctx.fillText("• R   : RESTART RUN", 240, 455);
-                ctx.fillText("• ESC : MAIN MENU", 240, 485);
+                ctx.fillText("• P   : PAUSE ACTION", 240, 485);
+                ctx.fillText("• ESC : MAIN MENU", 240, 515);
 
                 ctx.font = `13px ${FONT_FAMILY}`;
                 ctx.fillStyle = COLOR_BALL;
-                ctx.fillText("SPECTATOR (MODE 3)", 240, 540);
+                ctx.fillText("SPECTATOR (MODE 3)", 240, 565);
 
                 ctx.font = `9px ${FONT_FAMILY}`;
                 ctx.fillStyle = COLOR_TEXT;
-                ctx.fillText("• ARROWS ADJUST SPEED", 240, 575);
+                ctx.fillText("• ARROWS ADJUST SPEED", 240, 600);
+
+            } else if (activeSettingTab === 'difficulty') {
+                ctx.font = `13px ${FONT_FAMILY}`;
+                ctx.fillStyle = COLOR_BALL;
+                ctx.fillText("AI DIFFICULTY", 240, 240);
+
+                for (let btn of difficultyButtons) {
+                    const isSelected = aiDifficulty === btn.id;
+                    ctx.fillStyle = isSelected ? COLOR_BALL : '#151515';
+                    ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+                    ctx.strokeStyle = isSelected ? COLOR_TEXT : '#333333';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+
+                    ctx.fillStyle = isSelected ? '#000000' : COLOR_TEXT;
+                    ctx.textAlign = 'center';
+                    ctx.font = `11px ${FONT_FAMILY}`;
+                    ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2 + 5);
+                }
             } else if (activeSettingTab === 'av') {
                 // Render Dynamic AV Options
                 for (let opt of avOptions) {
@@ -832,31 +930,65 @@
             }
 
         } else if (gameState === 'PLAYING') {
-            // Screen boundaries bezel border
+            // Draw retro center division line
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([15, 15]);
+            ctx.beginPath();
+            ctx.moveTo(10, 400);
+            ctx.lineTo(logicalWidth - 10, 400);
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset dash state
+
+            // Determine Dynamic Non-Overlapping HUD layout texts
+            let topValue = "0";
+            let bottomValue = "0";
+            let topLabel = "BOT";
+            let bottomLabel = "SCORE";
+
+            if (gameMode === 4) {
+                topValue = scoreP2.toString();
+                bottomValue = scoreP1.toString();
+                topLabel = "P2";
+                bottomLabel = "P1";
+            } else if (gameMode === 1) {
+                topValue = highScoreMode1.toString();
+                bottomValue = score.toString();
+                topLabel = "BEST";
+            } else if (gameMode === 2) {
+                topValue = highScoreMode2.toString();
+                bottomValue = score.toString();
+                topLabel = "BEST";
+            } else if (gameMode === 3) {
+                topValue = "BOT";
+                bottomValue = score.toString();
+                topLabel = "SPEED";
+            }
+
+            // Draw Elegant Giant Background Numbers (Zero Paddle Overlap Guarantee)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+            ctx.textAlign = 'center';
+            ctx.font = `80px ${FONT_FAMILY}`;
+            ctx.fillText(topValue, logicalWidth / 2, 300);
+            ctx.fillText(bottomValue, logicalWidth / 2, 540);
+
+            // Small translucent metadata labels
+            ctx.font = `10px ${FONT_FAMILY}`;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.fillText(topLabel, logicalWidth / 2, 210);
+            ctx.fillText(bottomLabel, logicalWidth / 2, 450);
+
+            // Screen boundary retro overlay borders
             ctx.strokeStyle = '#222222';
             ctx.lineWidth = 4;
             ctx.strokeRect(2, 2, logicalWidth - 4, logicalHeight - 4);
 
-            if (gameMode === 4) {
-                // PvP Scores
-                ctx.fillStyle = COLOR_TEXT;
-                ctx.font = `24px ${FONT_FAMILY}`;
-                ctx.textAlign = 'left';
-                ctx.fillText(`P2: ${scoreP2}`, 25, 45);
-                ctx.fillText(`P1: ${scoreP1}`, 25, 780);
-            } else {
-                // Single Player Score
-                ctx.fillStyle = COLOR_TEXT;
-                ctx.font = `36px ${FONT_FAMILY}`;
-                ctx.textAlign = 'left';
-                ctx.fillText(score.toString(), 28, 95);
-            }
-
+            // Spectator mode speed display centered elegantly on the net line
             if (gameMode === 3 && speedNotificationTimer > 0) {
-                ctx.fillStyle = COLOR_TEXT;
-                ctx.font = `14px ${FONT_FAMILY}`;
-                ctx.textAlign = 'right';
-                ctx.fillText(`SPEED: ${timeScale.toFixed(1)}x`, logicalWidth - 28, 95);
+                ctx.fillStyle = COLOR_BALL;
+                ctx.font = `12px ${FONT_FAMILY}`;
+                ctx.textAlign = 'center';
+                ctx.fillText(`SPEED: ${timeScale.toFixed(1)}x`, logicalWidth / 2, 390);
                 speedNotificationTimer--;
             }
 
@@ -876,6 +1008,22 @@
             // Draw Ball
             ctx.fillStyle = COLOR_BALL;
             ctx.fillRect(ball.x - ball.radius, ball.y - ball.radius, ball.radius * 2, ball.radius * 2);
+
+            // --- Draw Pause State Overlay inside playing sequence ---
+            if (isPaused) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+                ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.textAlign = 'center';
+                ctx.font = `28px ${FONT_FAMILY}`;
+                ctx.fillText("PAUSED", logicalWidth / 2, logicalHeight / 2 - 20);
+
+                ctx.fillStyle = COLOR_MUTED;
+                ctx.font = `9px ${FONT_FAMILY}`;
+                ctx.fillText("PRESS 'P' OR TAP WITH 2 FINGERS", logicalWidth / 2, logicalHeight / 2 + 30);
+                ctx.fillText("TO RESUME UNIVERSE PHYSICS", logicalWidth / 2, logicalHeight / 2 + 50);
+            }
 
         } else if (gameState === 'GAMEOVER') {
             ctx.fillStyle = COLOR_TEXT;
