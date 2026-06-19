@@ -278,10 +278,14 @@
     // Key tracking
     const keys = { ArrowLeft: false, ArrowRight: false, KeyA: false, KeyD: false };
 
-    // Universal Input Tracking (Mouse & Multi-Touch)
+    // Universal Input Tracking & Identifier Binding
     let mouseActive = false;
     let mouseTouchPoint = { x: 0, y: 0 };
     let touchPoints = [];
+    
+    // Unique touch mappings to secure paddles in Mode 4
+    let p1TouchId = null;
+    let p2TouchId = null;
 
     // Pause toggle trigger
     function togglePause() {
@@ -402,6 +406,21 @@
                     }
                 }
             }
+        } else if (gameState === 'PLAYING') {
+            // Pause button in PvP mode (gameMode === 4)
+            if (gameMode === 4 && canvasX >= 280 && canvasX <= 320 && canvasY >= 380 && canvasY <= 420) {
+                togglePause();
+                return;
+            }
+            // "Return to Menu" button bounds inside paused screen
+            if (isPaused) {
+                if (canvasX >= 150 && canvasX <= 450 && canvasY >= 480 && canvasY <= 530) {
+                    isPaused = false;
+                    gameState = 'START';
+                    playSound('wall');
+                    return;
+                }
+            }
         } else if (gameState === 'GAMEOVER') {
             playSound('wall');
             gameState = 'START';
@@ -429,33 +448,82 @@
     });
     window.addEventListener('mouseup', () => mouseActive = false);
 
-    // Touch Listeners (Supports Multi-Touch for Local PvP and Two-Finger Pause)
+    // Touch Helper to map client coordinates to logical dimensions
+    function getTouchLogicalPoint(touch) {
+        return getCanvasPoint(touch.clientX, touch.clientY);
+    }
+
+    // Touch Listeners (Supports Secured Multi-Touch Paddle Mapping)
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
+        initAudio();
         
-        // Two-finger tap pauses the game
-        if (gameState === 'PLAYING' && e.touches.length === 2) {
-            togglePause();
-            return;
-        }
-
-        // Trigger clicks using the first touch
-        if (e.touches.length > 0 && gameState !== 'PLAYING') {
-            const pt = getCanvasPoint(e.touches[0].clientX, e.touches[0].clientY);
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const t = e.changedTouches[i];
+            const pt = getTouchLogicalPoint(t);
+            
+            // Handle regular menus, settings tabs, pause buttons & "Return to Menu" button
             handleMenuClick(pt.x, pt.y);
+            
+            if (gameState === 'PLAYING' && !isPaused && gameMode === 4) {
+                // Ensure they didn't tap the paused symbol overlay button
+                const hitPauseButton = (pt.x >= 280 && pt.x <= 320 && pt.y >= 380 && pt.y <= 420);
+                if (!hitPauseButton) {
+                    // Lock active finger ID to respective halves to prevent paddle stealing
+                    if (pt.y > 400) {
+                        if (p1TouchId === null) p1TouchId = t.identifier;
+                    } else {
+                        if (p2TouchId === null) p2TouchId = t.identifier;
+                    }
+                }
+            }
+        }
+        
+        // Setup gesture tracking for single player models
+        if (gameState === 'PLAYING' && gameMode !== 4) {
+            touchPoints = Array.from(e.touches).map(t => getTouchLogicalPoint(t));
+            
+            // Two-finger pause gesture (Strictly isolated to solo play)
+            if (e.touches.length === 2) {
+                togglePause();
+            }
         }
     }, { passive: false });
 
-    window.addEventListener('touchmove', (e) => {
+    canvas.addEventListener('touchmove', (e) => {
         e.preventDefault();
-        touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
+        if (gameState !== 'PLAYING' || isPaused) return;
+
+        if (gameMode === 4) {
+            // Process locked finger maps to move respective paddles securely
+            for (let i = 0; i < e.touches.length; i++) {
+                const t = e.touches[i];
+                const pt = getTouchLogicalPoint(t);
+                if (t.identifier === p1TouchId) {
+                    player.x += (pt.x - player.width / 2 - player.x) * 0.25;
+                } else if (t.identifier === p2TouchId) {
+                    ai.x += (pt.x - ai.width / 2 - ai.x) * 0.25;
+                }
+            }
+        } else {
+            // Keep general touchpoints array up to date for single player clamped updates
+            touchPoints = Array.from(e.touches).map(t => getTouchLogicalPoint(t));
+        }
     }, { passive: false });
 
-    window.addEventListener('touchend', (e) => {
+    function handleTouchEnd(e) {
         e.preventDefault();
-        touchPoints = Array.from(e.touches).map(t => getCanvasPoint(t.clientX, t.clientY));
-    }, { passive: false });
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const t = e.changedTouches[i];
+            if (t.identifier === p1TouchId) p1TouchId = null;
+            if (t.identifier === p2TouchId) p2TouchId = null;
+        }
+        if (gameMode !== 4) {
+            touchPoints = Array.from(e.touches).map(t => getTouchLogicalPoint(t));
+        }
+    }
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
 
     function startNewGame(mode) {
@@ -468,6 +536,11 @@
         isPaused = false;
         timeScale = 1.0;
         speedNotificationTimer = 0;
+        
+        // Reset bound paddle controls
+        p1TouchId = null;
+        p2TouchId = null;
+        touchPoints = [];
         
         // Initialize AI speeds directly matching Difficulty Tiers
         if (aiDifficulty === 'EASY') ai.speed = 5.0;
@@ -577,10 +650,6 @@
         if (gameState !== 'PLAYING') return;
         if (isPaused) return; // Freeze execution when paused
 
-        // Combine active input points
-        let inputs = [...touchPoints];
-        if (mouseActive) inputs.push(mouseTouchPoint);
-
         // Track historical position states
         player.prevX = player.x;
         ai.prevX = ai.x;
@@ -617,31 +686,33 @@
             player.x += moveAmount * timeScale;
 
         } else if (gameMode === 4) {
-            // Mode 4: True Multi-Touch / Dual Keyboard
-            let p1Touched = false, p2Touched = false;
-            for (let pt of inputs) {
-                if (pt.y > logicalHeight / 2) { // Bottom Half -> P1
-                    player.x += (pt.x - player.width / 2 - player.x) * 0.25;
-                    p1Touched = true;
-                } else { // Top Half -> P2
-                    ai.x += (pt.x - ai.width / 2 - ai.x) * 0.25;
-                    p2Touched = true;
-                }
-            }
-            if (!p1Touched) {
+            // Mode 4: Bound touch identifiers (No steal controls), Keyboard fallback
+            if (p1TouchId === null) {
                 if (keys.ArrowLeft) player.x -= player.speed;
                 if (keys.ArrowRight) player.x += player.speed;
             }
-            if (!p2Touched) {
+            if (p2TouchId === null) {
                 if (keys.KeyA) ai.x -= ai.speed;
                 if (keys.KeyD) ai.x += ai.speed;
             }
         } else {
-            // Modes 1 & 2: Single Player Input
-            if (inputs.length > 0) {
-                const pt = inputs[inputs.length - 1];
-                player.x += (pt.x - player.width / 2 - player.x) * 0.25;
+            // Modes 1 & 2: Solo Play, Clamped Input Movements (Strictly prevents teleporting)
+            let targetPointerX = null;
+            if (touchPoints.length > 0) {
+                targetPointerX = touchPoints[touchPoints.length - 1].x;
+            } else if (mouseActive) {
+                targetPointerX = mouseTouchPoint.x;
+            }
+
+            if (targetPointerX !== null) {
+                const targetPaddleX = targetPointerX - player.width / 2;
+                const diff = targetPaddleX - player.x;
+                // Clamp speed delta to prevent teleporting
+                const maxStep = player.speed * 1.5;
+                const step = Math.max(-maxStep, Math.min(maxStep, diff));
+                player.x += step;
             } else {
+                // Keyboard Input fallback
                 if (keys.ArrowLeft || keys.KeyA) player.x -= player.speed;
                 if (keys.ArrowRight || keys.KeyD) player.x += player.speed;
             }
@@ -1009,20 +1080,61 @@
             ctx.fillStyle = COLOR_BALL;
             ctx.fillRect(ball.x - ball.radius, ball.y - ball.radius, ball.radius * 2, ball.radius * 2);
 
+            // Draw Subtle Pause Button inside the Center Division Line in PvP Mode (gameMode === 4)
+            if (gameMode === 4) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+                ctx.lineWidth = 2;
+                
+                const btnX = 280;
+                const btnY = 380;
+                const btnW = 40;
+                const btnH = 40;
+                
+                ctx.fillRect(btnX, btnY, btnW, btnH);
+                ctx.strokeRect(btnX, btnY, btnW, btnH);
+                
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.fillRect(293, 390, 4, 20);
+                ctx.fillRect(303, 390, 4, 20);
+                ctx.restore();
+            }
+
             // --- Draw Pause State Overlay inside playing sequence ---
             if (isPaused) {
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
                 ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
                 ctx.fillStyle = COLOR_TEXT;
                 ctx.textAlign = 'center';
                 ctx.font = `28px ${FONT_FAMILY}`;
-                ctx.fillText("PAUSED", logicalWidth / 2, logicalHeight / 2 - 20);
+                ctx.fillText("PAUSED", logicalWidth / 2, logicalHeight / 2 - 80);
 
                 ctx.fillStyle = COLOR_MUTED;
                 ctx.font = `9px ${FONT_FAMILY}`;
-                ctx.fillText("PRESS 'P' OR TAP WITH 2 FINGERS", logicalWidth / 2, logicalHeight / 2 + 30);
-                ctx.fillText("TO RESUME UNIVERSE PHYSICS", logicalWidth / 2, logicalHeight / 2 + 50);
+                ctx.fillText("PRESS 'P' TO RESUME", logicalWidth / 2, logicalHeight / 2 - 30);
+                if (gameMode !== 4) {
+                    ctx.fillText("OR TAP WITH 2 FINGERS", logicalWidth / 2, logicalHeight / 2 - 10);
+                } else {
+                    ctx.fillText("OR TAP THE PAUSE SYMBOL IN THE NET", logicalWidth / 2, logicalHeight / 2 - 10);
+                }
+
+                // Draw "RETURN TO MENU" Button
+                const rbtnX = 150;
+                const rbtnY = 480;
+                const rbtnW = 300;
+                const rbtnH = 50;
+                
+                ctx.fillStyle = '#222222';
+                ctx.fillRect(rbtnX, rbtnY, rbtnW, rbtnH);
+                ctx.strokeStyle = COLOR_BALL;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(rbtnX, rbtnY, rbtnW, rbtnH);
+
+                ctx.fillStyle = COLOR_TEXT;
+                ctx.font = `11px ${FONT_FAMILY}`;
+                ctx.fillText("RETURN TO MENU", logicalWidth / 2, rbtnY + 31);
             }
 
         } else if (gameState === 'GAMEOVER') {
