@@ -449,13 +449,8 @@
                 }
             }
         } else if (gameState === 'PLAYING') {
-            // Expanded Highly-Ergonomic Invisible Pause target for Local PvP (x: 120-480, y: 350-450) - disabled during countdown
-            if (gameMode === 4 && serveDelayFrames === 0 && canvasX >= 120 && canvasX <= 480 && canvasY >= 350 && canvasY <= 450) {
-                togglePause();
-                return;
-            }
-            // Precise button targets inside paused screen (No random background unpausing!)
             if (isPaused) {
+                // When paused, ONLY check the resume/menu buttons
                 // Check Resume Button: x: 150 to 450, y: 410 to 460
                 if (canvasX >= 150 && canvasX <= 450 && canvasY >= 410 && canvasY <= 460) {
                     isPaused = false;
@@ -470,8 +465,22 @@
                     playSound('wall');
                     return;
                 }
-                // Block clicks anywhere else on the screen from unpausing
-                return;
+                return; // Block any other unpausing clicks when active menu is rendered
+            } else {
+                // Not paused: check active gameplay pause triggers
+                if (gameMode === 4) {
+                    // PvP mode: Expanded Highly-Ergonomic Invisible Pause target (x: 120-480, y: 350-450)
+                    if (canvasX >= 120 && canvasX <= 480 && canvasY >= 350 && canvasY <= 450) {
+                        togglePause();
+                        return;
+                    }
+                } else {
+                    // Solo modes: Highly ergonomic Top-Right corner tap button box (x: 480-600, y: 0-120)
+                    if (canvasX >= 480 && canvasY <= 120) {
+                        togglePause();
+                        return;
+                    }
+                }
             }
         } else if (gameState === 'GAMEOVER') {
             playSound('wall');
@@ -538,15 +547,22 @@
             const t = e.changedTouches[i];
             const pt = getTouchLogicalPoint(t);
             handleMenuClick(pt.x, pt.y);
+            
+            if (gameState === 'PLAYING' && !isPaused && gameMode === 4) {
+                // Securely bypass touch lock registering on active pause button zone
+                const hitPauseButton = (pt.x >= 120 && pt.x <= 480 && pt.y >= 350 && pt.y <= 450);
+                if (!hitPauseButton) {
+                    if (pt.y > 400) {
+                        if (p1TouchId === null) p1TouchId = t.identifier;
+                    } else {
+                        if (p2TouchId === null) p2TouchId = t.identifier;
+                    }
+                }
+            }
         }
         
-        if (gameState === 'PLAYING' && !isPaused && gameMode === 4) {
-            rebindActivePvPTouches();
-        }
-        
-        // Setup gesture tracking for single player models
+        // Setup simple two-finger tap pause gesture anywhere for solo play
         if (gameState === 'PLAYING' && gameMode !== 4) {
-            // Two-finger pause gesture (Strictly isolated to solo play)
             if (e.touches.length === 2) {
                 togglePause();
             }
@@ -770,10 +786,17 @@
         } else {
             // Modes 1 & 2: Solo Play, Clamped Input Movements (Strictly prevents teleporting)
             let targetPointerX = null;
+            
+            // Clean UX Filter: Ignore paddle inputs targeting the Top-Right pause button region
             if (activeTouches.length > 0) {
-                targetPointerX = activeTouches[activeTouches.length - 1].x;
+                const validTouches = activeTouches.filter(t => !(t.x >= 480 && t.y <= 120));
+                if (validTouches.length > 0) {
+                    targetPointerX = validTouches[validTouches.length - 1].x;
+                }
             } else if (mouseActive) {
-                targetPointerX = mouseTouchPoint.x;
+                if (!(mouseTouchPoint.x >= 480 && mouseTouchPoint.y <= 120)) {
+                    targetPointerX = mouseTouchPoint.x;
+                }
             }
 
             if (targetPointerX !== null) {
@@ -1232,6 +1255,21 @@
                 ctx.fillText(countdownLabel, logicalWidth / 2, logicalHeight / 2 - 40);
             }
 
+            // Draw Dedicated Corner Pause Button in Solo Modes (Modes 1, 2, 3)
+            if (gameMode !== 4) {
+                ctx.save();
+                // Draw a subtle, high-contrast corner box
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(530, 30, 40, 40);
+                
+                // Draw classic retro twin vertical bars
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+                ctx.fillRect(543, 40, 4, 20);
+                ctx.fillRect(553, 40, 4, 20);
+                ctx.restore();
+            }
+
             // Draw Pause Button inside the Center Net Division Line in PvP Mode (gameMode === 4) - Hidden during countdown!
             if (gameMode === 4 && serveDelayFrames === 0) {
                 ctx.save();
@@ -1310,11 +1348,11 @@
             ctx.font = `16px ${FONT_FAMILY}`;
             ctx.fillStyle = COLOR_BALL;
             if (gameMode === 4) {
-                ctx.fillText(`PLAYER ${winnerMode4} WINS!`, logicalWidth / 2, 350);
+                ctx.fillText("PLAYER " + winnerMode4 + " WINS!", logicalWidth / 2, 350);
                 ctx.fillStyle = COLOR_TEXT;
-                ctx.fillText(`${scoreP1} - ${scoreP2}`, logicalWidth / 2, 380);
+                ctx.fillText(scoreP1 + " - " + scoreP2, logicalWidth / 2, 380);
             } else {
-                ctx.fillText(`FINAL SCORE: ${score}`, logicalWidth / 2, 360);
+                ctx.fillText("FINAL SCORE: " + score, logicalWidth / 2, 360);
             }
 
             ctx.fillStyle = COLOR_MUTED;
@@ -1329,41 +1367,6 @@
         // Apply scanline shader overlay over the rendered layout
         drawCRTOverlay();
     }
-
-    // Touch Lock Synchronizer Helper with safe multi-touch collision handling
-    canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        initAudio();
-        syncActiveTouches(e);
-        
-        // Handle menu triggers
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const t = e.changedTouches[i];
-            const pt = getTouchLogicalPoint(t);
-            handleMenuClick(pt.x, pt.y);
-            
-            if (gameState === 'PLAYING' && !isPaused && gameMode === 4) {
-                // Ensure they didn't tap the paused symbol overlay button's extended ergonomic target
-                const hitPauseButton = (serveDelayFrames === 0 && pt.x >= 120 && pt.x <= 480 && pt.y >= 350 && pt.y <= 450);
-                if (!hitPauseButton) {
-                    // Lock active finger ID to respective halves to prevent paddle stealing
-                    if (pt.y > 400) {
-                        if (p1TouchId === null) p1TouchId = t.identifier;
-                    } else {
-                        if (p2TouchId === null) p2TouchId = t.identifier;
-                    }
-                }
-            }
-        }
-        
-        // Setup gesture tracking for single player models
-        if (gameState === 'PLAYING' && gameMode !== 4) {
-            // Two-finger pause gesture (Strictly isolated to solo play)
-            if (e.touches.length === 2) {
-                togglePause();
-            }
-        }
-    }, { passive: false });
 
     function tick() {
         update();
